@@ -9,8 +9,8 @@ env/
 .vscode/
 
 # Large data and augmented files
-augmented_dataset/
-data/
+# augmented_dataset/
+# data/
 data.rar
 
 # Python caches
