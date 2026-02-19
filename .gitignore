@@ -1,0 +1,27 @@
+# Environments
+venv/
+.venv/
+env/
+.env/
+
+# IDEs
+.idea/
+.vscode/
+
+# Large data and augmented files
+augmented_dataset/
+data/
+data.rar
+
+# Python caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Models
+# fruit_resnet_model.pth # Keep it for now
+
+# System files
+.DS_Store
+Thumbs.db
