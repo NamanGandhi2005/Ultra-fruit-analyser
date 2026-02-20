@@ -1,0 +1,38 @@
+{
+    "class_names": [
+        "apple_stage_1",
+        "apple_stage_2",
+        "apple_stage_3",
+        "banana_stage_1",
+        "banana_stage_2",
+        "banana_stage_3",
+        "banana_stage_4",
+        "banana_stage_5",
+        "banana_stage_6",
+        "banana_stage_7",
+        "banana_stage_8",
+        "banana_stage_9",
+        "mango_stage_1",
+        "mango_stage_2",
+        "mango_stage_3",
+        "mango_stage_4",
+        "orange_stage_1",
+        "orange_stage_2",
+        "orange_stage_3",
+        "orange_stage_4",
+        "orange_stage_5"
+    ],
+    "input_size": 224,
+    "normalization": {
+        "mean": [
+            0.485,
+            0.456,
+            0.406
+        ],
+        "std": [
+            0.229,
+            0.224,
+            0.225
+        ]
+    }
+}
