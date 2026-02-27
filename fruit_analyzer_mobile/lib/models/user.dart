@@ -6,12 +6,14 @@ class User {
   final String email;
   final String createdAt;
   int analysisCount;
+  final bool isGuest;
 
   User({
     required this.username,
     required this.email,
     required this.createdAt,
     required this.analysisCount,
+    this.isGuest = false,
   });
 
   factory User.fromMap(Map<String, dynamic> map) {
@@ -20,6 +22,7 @@ class User {
       email: map['email'] ?? '',
       createdAt: map['createdAt'] ?? '',
       analysisCount: map['analysisCount'] ?? 0,
+      isGuest: map['isGuest'] ?? false,
     );
   }
 
@@ -29,6 +32,7 @@ class User {
       'email': email,
       'createdAt': createdAt,
       'analysisCount': analysisCount,
+      'isGuest': isGuest,
     };
   }
 

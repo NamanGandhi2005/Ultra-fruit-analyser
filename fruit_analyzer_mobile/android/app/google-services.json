@@ -1,0 +1,47 @@
+{
+  "project_info": {
+    "project_number": "230498533007",
+    "project_id": "fruitanalyzermobile",
+    "storage_bucket": "fruitanalyzermobile.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:230498533007:android:25d7d04d65c00f083bfafa",
+        "android_client_info": {
+          "package_name": "com.example.fruit_analyzer_mobile"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "230498533007-egeie9f4gtpr9a8bagji391e76h5huop.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.example.fruit_analyzer_mobile",
+            "certificate_hash": "5226af94e0a38b3da9b05740c48d78ddc3fdcd65"
+          }
+        },
+        {
+          "client_id": "230498533007-omltae19bhbo49oftn5n2soenpf7o2d2.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCuUYHqy8iObuYICQyIkUWevllwLftZITY"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "230498533007-omltae19bhbo49oftn5n2soenpf7o2d2.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

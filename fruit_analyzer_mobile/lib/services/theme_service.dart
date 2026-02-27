@@ -23,51 +23,64 @@ class ThemeService extends ChangeNotifier {
   }
 
   ThemeData get themeData {
-    if (_isDarkMode) {
-      return ThemeData(
-        useMaterial3: true,
-        brightness: Brightness.dark,
-        primaryColor: const Color(0xFF2ecc71),
-        scaffoldBackgroundColor: const Color(0xFF121212),
-        colorScheme: const ColorScheme.dark(
-          primary: Color(0xFF2ecc71),
-          secondary: Color(0xFF3498db),
-          surface: Color(0xFF1E1E1E),
-        ),
-        cardTheme: CardTheme(
-          color: const Color(0xFF1E1E1E),
-          elevation: 4,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        ),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Colors.transparent,
-          elevation: 0,
-          centerTitle: true,
-        ),
-      );
-    } else {
-      return ThemeData(
-        useMaterial3: true,
-        brightness: Brightness.light,
-        primaryColor: const Color(0xFF27ae60),
-        scaffoldBackgroundColor: const Color(0xFFF5F6FA),
-        colorScheme: const ColorScheme.light(
-          primary: Color(0xFF27ae60),
-          secondary: Color(0xFF2980b9),
-          surface: Colors.white,
-        ),
-        cardTheme: CardTheme(
-          color: Colors.white,
-          elevation: 2,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        ),
-        appBarTheme: const AppBarTheme(
-          backgroundColor: Colors.white,
-          foregroundColor: Colors.black,
-          elevation: 0,
-          centerTitle: true,
-        ),
-      );
-    }
+    return _isDarkMode ? _auraDarkTheme : _auraLightTheme;
   }
+
+  static final ThemeData _auraDarkTheme = ThemeData(
+    useMaterial3: true,
+    brightness: Brightness.dark,
+    scaffoldBackgroundColor: const Color(0xFF0D0F14),
+    primaryColor: const Color(0xFF4F8CFF),
+    colorScheme: const ColorScheme.dark(
+      primary: Color(0xFF4F8CFF),
+      secondary: Color(0xFF7C5CFF),
+      surface: Color(0xFF151821),
+      onSurface: Colors.white,
+      surfaceContainerHighest: Color(0xFF1C1F2A),
+      error: Color(0xFFFF5A5F),
+    ),
+    cardTheme: CardTheme(
+      color: const Color(0xFF1C1F2A),
+      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+    ),
+    appBarTheme: const AppBarTheme(
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      centerTitle: true,
+      titleTextStyle: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+    ),
+    dividerTheme: const DividerThemeData(
+      color: Color(0xFF262A35),
+      thickness: 1,
+    ),
+  );
+
+  static final ThemeData _auraLightTheme = ThemeData(
+    useMaterial3: true,
+    brightness: Brightness.light,
+    scaffoldBackgroundColor: const Color(0xFFF8F9FD),
+    primaryColor: const Color(0xFF4F8CFF),
+    colorScheme: const ColorScheme.light(
+      primary: Color(0xFF4F8CFF),
+      secondary: Color(0xFF7C5CFF),
+      surface: Colors.white,
+      onSurface: Color(0xFF0D0F14),
+      surfaceContainerHighest: Color(0xFFF0F2F8),
+      error: Color(0xFFFF5A5F),
+    ),
+    cardTheme: CardTheme(
+      color: Colors.white,
+      elevation: 2,
+      shadowColor: Colors.black.withOpacity(0.05),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+    ),
+    appBarTheme: const AppBarTheme(
+      backgroundColor: Colors.transparent,
+      elevation: 0,
+      centerTitle: true,
+      iconTheme: IconThemeData(color: Color(0xFF0D0F14)),
+      titleTextStyle: TextStyle(color: Color(0xFF0D0F14), fontSize: 20, fontWeight: FontWeight.bold),
+    ),
+  );
 }

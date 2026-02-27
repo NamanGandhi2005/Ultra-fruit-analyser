@@ -4,6 +4,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/notification_service.dart';
 import '../services/theme_service.dart';
 
+import 'package:google_fonts/google_fonts.dart';
+
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
@@ -64,108 +66,141 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final themeService = Provider.of<ThemeService>(context);
+    final isDark = theme.brightness == Brightness.dark;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Settings')),
+      backgroundColor: theme.scaffoldBackgroundColor,
+      appBar: AppBar(
+        title: Text('SETTINGS', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 16, letterSpacing: 2, color: theme.colorScheme.onSurface)),
+        backgroundColor: Colors.transparent,
+        iconTheme: IconThemeData(color: theme.colorScheme.onSurface),
+      ),
       body: ListView(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
         children: [
           // Theme Section
-          _sectionHeader("🎨 App Appearance", Icons.palette_outlined),
-          Card(
+          _sectionHeader("APPEARANCE", Icons.palette_outlined),
+          Container(
+            decoration: BoxDecoration(
+              color: theme.cardTheme.color,
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: theme.colorScheme.onSurface.withOpacity(0.05)),
+              boxShadow: [
+                if (!isDark) BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))
+              ],
+            ),
             child: SwitchListTile(
-              secondary: Icon(themeService.isDarkMode ? Icons.dark_mode : Icons.light_mode, color: theme.colorScheme.primary),
-              title: const Text("Dark Mode"),
-              subtitle: Text(themeService.isDarkMode ? "Eyes comfortable" : "Bright and clear"),
+              secondary: Icon(themeService.isDarkMode ? Icons.dark_mode_rounded : Icons.light_mode_rounded, color: theme.colorScheme.primary),
+              title: Text("Dark Mode", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: theme.colorScheme.onSurface)),
+              subtitle: Text(themeService.isDarkMode ? "Enabled" : "Disabled", style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurface.withOpacity(0.6))),
               value: themeService.isDarkMode,
               onChanged: (_) => themeService.toggleTheme(),
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 32),
 
           // Telegram Section
-          _sectionHeader("📱 Telegram Alerts", Icons.message_outlined),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  _inputField(_telegramToken, "Bot Token", obscure: true),
-                  const SizedBox(height: 12),
-                  _inputField(_telegramChatId, "Chat ID"),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text("Enable Telegram Alerts"),
-                    value: _telegramEnabled,
-                    onChanged: (val) => setState(() => _telegramEnabled = val),
-                  ),
-                ],
-              ),
+          _sectionHeader("TELEGRAM NOTIFICATIONS", Icons.notifications_active_outlined),
+          _glassContainer([
+            _inputField(_telegramToken, "Bot Token", obscure: true),
+            const SizedBox(height: 16),
+            _inputField(_telegramChatId, "Chat ID"),
+            const SizedBox(height: 8),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text("Enable Alerts", style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: theme.colorScheme.onSurface)),
+              value: _telegramEnabled,
+              onChanged: (val) => setState(() => _telegramEnabled = val),
             ),
-          ),
-          const SizedBox(height: 24),
+          ]),
+          const SizedBox(height: 32),
 
           // Email Section
-          _sectionHeader("📧 Email Settings", Icons.email_outlined),
-          Card(
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                children: [
-                  _inputField(_smtpServer, "SMTP Server"),
-                  const SizedBox(height: 12),
-                  _inputField(_smtpPort, "SMTP Port"),
-                  const SizedBox(height: 12),
-                  _inputField(_email, "Email Address"),
-                  const SizedBox(height: 12),
-                  _inputField(_emailPassword, "Email Password", obscure: true),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text("Enable Email Alerts"),
-                    value: _emailEnabled,
-                    onChanged: (val) => setState(() => _emailEnabled = val),
-                  ),
+          _sectionHeader("EMAIL SERVER", Icons.alternate_email_rounded),
+          _glassContainer([
+            _inputField(_smtpServer, "SMTP Host"),
+            const SizedBox(height: 16),
+            _inputField(_smtpPort, "Port"),
+            const SizedBox(height: 16),
+            _inputField(_email, "Email User"),
+            const SizedBox(height: 16),
+            _inputField(_emailPassword, "Password", obscure: true),
+            const SizedBox(height: 8),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: Text("Enable Email Alerts", style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: theme.colorScheme.onSurface)),
+              value: _emailEnabled,
+              onChanged: (val) => setState(() => _emailEnabled = val),
+            ),
+          ]),
+          
+          const SizedBox(height: 48),
+          GestureDetector(
+            onTap: _saveSettings,
+            child: Container(
+              height: 60,
+              decoration: BoxDecoration(
+                gradient: LinearGradient(colors: [theme.colorScheme.primary, theme.colorScheme.secondary]),
+                borderRadius: BorderRadius.circular(20),
+                boxShadow: [
+                  BoxShadow(color: theme.colorScheme.primary.withOpacity(0.3), blurRadius: 20, offset: const Offset(0, 8))
                 ],
+              ),
+              child: const Center(
+                child: Text("SAVE SETTINGS", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
               ),
             ),
           ),
-          
-          const SizedBox(height: 32),
-          ElevatedButton(
-            onPressed: _saveSettings,
-            style: ElevatedButton.styleFrom(
-              minimumSize: const Size(double.infinity, 56),
-              elevation: 4,
-            ),
-            child: const Text("SAVE CONFIGURATION", style: TextStyle(fontWeight: FontWeight.bold)),
-          ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 40),
         ],
       ),
+    );
+  }
+
+  Widget _glassContainer(List<Widget> children) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: theme.cardTheme.color,
+        borderRadius: BorderRadius.circular(32),
+        border: Border.all(color: theme.colorScheme.onSurface.withOpacity(0.05)),
+        boxShadow: [
+          if (!isDark) BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))
+        ],
+      ),
+      child: Column(children: children),
     );
   }
 
   Widget _sectionHeader(String title, IconData icon) {
+    final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.only(left: 8, bottom: 8),
-      child: Row(
-        children: [
-          Icon(icon, size: 20, color: Theme.of(context).colorScheme.primary),
-          const SizedBox(width: 8),
-          Text(title, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, letterSpacing: 0.5)),
-        ],
-      ),
+      padding: const EdgeInsets.only(left: 4, bottom: 12),
+      child: Text(title, style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.5, color: theme.colorScheme.onSurface.withOpacity(0.6))),
     );
   }
 
   Widget _inputField(TextEditingController controller, String label, {bool obscure = false}) {
-    return TextField(
-      controller: controller,
-      obscureText: obscure,
-      decoration: InputDecoration(
-        labelText: label,
-        isDense: true,
-        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.onSurface.withOpacity(0.03),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: theme.colorScheme.onSurface.withOpacity(0.05)),
+      ),
+      child: TextField(
+        controller: controller,
+        obscureText: obscure,
+        style: TextStyle(fontSize: 14, color: theme.colorScheme.onSurface),
+        decoration: InputDecoration(
+          labelText: label,
+          labelStyle: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.6), fontSize: 12),
+          border: InputBorder.none,
+          contentPadding: const EdgeInsets.symmetric(vertical: 12),
+        ),
       ),
     );
   }
