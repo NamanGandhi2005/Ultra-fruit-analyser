@@ -1,0 +1,17 @@
+[1:01:13.014053316] [43138]  INFO Camera camera_manager.cpp:340 libcamera v0.7.0+rpt20260205
+🚀 AI Engine utilizing: cpu
+✅ Model loaded. Classes: 21
+❌ LCD Init Failed: [Errno 2] No such file or directory
+Traceback (most recent call last):
+  File "/home/naman/Desktop/Ultra-fruit-analyser/pi_automated_analyzer.py", line 270, in <module>
+    analyzer = PiFruitAnalyzer()
+  File "/home/naman/Desktop/Ultra-fruit-analyser/pi_automated_analyzer.py", line 178, in __init__
+    self.setup_camera()
+    ~~~~~~~~~~~~~~~~~^^
+  File "/home/naman/Desktop/Ultra-fruit-analyser/pi_automated_analyzer.py", line 202, in setup_camera
+    self.camera = Picamera2()
+                  ~~~~~~~~~^^
+  File "/usr/lib/python3/dist-packages/picamera2/picamera2.py", line 341, in __init__
+    camera_num = self.global_camera_info()[camera_num]['Num']
+                 ~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^
+IndexError: list index out of range
