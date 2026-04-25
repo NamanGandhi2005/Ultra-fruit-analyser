@@ -55,14 +55,14 @@ def export_model(model_path='fruit_resnet_model.pth', onnx_path='fruit_model.onn
         dummy_input,
         onnx_path,
         export_params=True,
-        opset_version=17,
+        opset_version=13,
         do_constant_folding=True,
         input_names=['input'],
         output_names=['output'],
         dynamic_axes={'input': {0: 'batch_size'}, 'output': {0: 'batch_size'}}
     )
 
-    # Save metadata for Flutter
+    # Save metadata
     model_info = {
         'class_names': class_names,
         'input_size': 224,
@@ -74,6 +74,19 @@ def export_model(model_path='fruit_resnet_model.pth', onnx_path='fruit_model.onn
     
     with open(info_path, 'w') as f:
         json.dump(model_info, f, indent=4)
+
+    # Optional: Copy to mobile assets for convenience
+    mobile_assets_dir = 'fruit_analyzer_mobile/assets/model'
+    if os.path.exists(mobile_assets_dir):
+        import shutil
+        shutil.copy(onnx_path, os.path.join(mobile_assets_dir, 'fruit_model.onnx'))
+        
+        # Also copy info to assets/data if it exists
+        mobile_data_dir = 'fruit_analyzer_mobile/assets/data'
+        if os.path.exists(mobile_data_dir):
+            shutil.copy(info_path, os.path.join(mobile_data_dir, 'model_info.json'))
+        
+        print(f"📦 Also copied files to mobile assets.")
 
     print(f"✅ Success!")
 
