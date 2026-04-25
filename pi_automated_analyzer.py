@@ -38,6 +38,13 @@ def video_feed():
             time.sleep(0.05)
     return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
+@app.route('/latest_frame')
+def latest_frame():
+    frame = remote_state.get("current_frame")
+    if frame is not None:
+        return Response(frame, mimetype='image/jpeg')
+    return "No frame", 404
+
 @app.route('/set_fruit', methods=['POST'])
 def set_fruit():
     data = request.json

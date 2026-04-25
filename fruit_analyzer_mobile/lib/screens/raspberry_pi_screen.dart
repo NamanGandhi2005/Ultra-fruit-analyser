@@ -1,7 +1,7 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/pi_service.dart';
-import '../services/history_service.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 class RaspberryPiScreen extends StatefulWidget {
@@ -15,13 +15,28 @@ class _RaspberryPiScreenState extends State<RaspberryPiScreen> {
   double _focusValue = 5.0;
   bool _isManualFocus = false;
   String _selectedFruit = 'auto';
+  Timer? _pollingTimer;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      Provider.of<PiService>(context, listen: false).connect();
+      final piService = Provider.of<PiService>(context, listen: false);
+      piService.connect();
+      
+      // Start frame polling every 100ms
+      _pollingTimer = Timer.periodic(const Duration(milliseconds: 150), (timer) {
+        if (mounted && piService.isConnected) {
+          piService.fetchFrame();
+        }
+      });
     });
+  }
+
+  @override
+  void dispose() {
+    _pollingTimer?.cancel();
+    super.dispose();
   }
 
   @override
@@ -31,12 +46,13 @@ class _RaspberryPiScreenState extends State<RaspberryPiScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text("Pi 5 Fruit Analyser"),
+        title: const Text("Pi 5 Live Feed"),
         actions: [
           Padding(
             padding: const EdgeInsets.only(right: 16.0),
             child: Icon(
-              Icons.link,
+              Icons.circle,
+              size: 12,
               color: piService.isConnected ? Colors.green : Colors.red,
             ),
           ),
@@ -44,65 +60,56 @@ class _RaspberryPiScreenState extends State<RaspberryPiScreen> {
       ),
       body: Column(
         children: [
-          // Live Feed Section
+          // Live Feed Section using Memory Polling
           Expanded(
             flex: 2,
             child: Stack(
               alignment: Alignment.center,
               children: [
-                if (piService.isConnected)
-                  Image.network(
-                    piService.streamUrl,
-                    fit: BoxFit.cover,
-                    width: double.infinity,
-                    gaplessPlayback: true,
-                    errorBuilder: (context, error, stackTrace) => Container(
-                      color: Colors.black,
-                      child: Center(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.error_outline, color: Colors.red, size: 40),
-                            const Text("Stream Unavailable", style: TextStyle(color: Colors.white)),
-                            TextButton(
-                              onPressed: () => piService.refreshStream(), 
-                              child: const Text("Retry Stream")
-                            )
-                          ],
+                Container(
+                  color: Colors.black,
+                  width: double.infinity,
+                  child: piService.currentFrame != null
+                      ? Image.memory(
+                          piService.currentFrame!,
+                          gaplessPlayback: true,
+                          fit: BoxFit.contain,
+                        )
+                      : const Center(
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              CircularProgressIndicator(color: Colors.blueAccent),
+                              SizedBox(height: 10),
+                              Text("Initializing Feed...", style: TextStyle(color: Colors.white70)),
+                            ],
+                          ),
                         ),
-                      ),
-                    ),
-                  )
-                else
-                  Container(
-                    color: Colors.black87,
-                    child: const Center(child: CircularProgressIndicator()),
-                  ),
+                ),
                 
                 // Scanning Frame Overlay
                 Container(
                   width: 250,
                   height: 250,
                   decoration: BoxDecoration(
-                    border: Border.all(color: Colors.white.withOpacity(0.5), width: 2),
+                    border: Border.all(color: Colors.white.withOpacity(0.3), width: 1.5),
                     borderRadius: BorderRadius.circular(20),
                   ),
                 ),
 
-                // Connection status overlay if disconnected
                 if (!piService.isConnected)
                   Container(
-                    color: Colors.black54,
+                    color: Colors.black87,
                     child: Center(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           const Icon(Icons.wifi_off, color: Colors.white, size: 50),
                           const SizedBox(height: 10),
-                          Text("Connecting to ${piService.ip}...", style: const TextStyle(color: Colors.white)),
+                          Text("Pi Offline at ${piService.ip}", style: const TextStyle(color: Colors.white)),
                           TextButton(
                             onPressed: () => _showIpDialog(context, piService),
-                            child: const Text("Change IP"),
+                            child: const Text("Update IP"),
                           )
                         ],
                       ),
@@ -125,15 +132,14 @@ class _RaspberryPiScreenState extends State<RaspberryPiScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Status Badge
                     if (piService.latestResult != null)
                       _buildStatusCard(piService.latestResult!, theme),
                     
                     const SizedBox(height: 20),
-                    const Text("Focus Control", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
+                    const Text("Lens Control", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                     Row(
                       children: [
-                        const Text("Auto"),
+                        const Text("AF"),
                         Switch(
                           value: _isManualFocus,
                           onChanged: (val) {
@@ -151,16 +157,12 @@ class _RaspberryPiScreenState extends State<RaspberryPiScreen> {
                         max: 10.0,
                         divisions: 100,
                         label: _focusValue.toStringAsFixed(1),
-                        onChanged: (val) {
-                          setState(() => _focusValue = val);
-                        },
-                        onChangeEnd: (val) {
-                          piService.setFocus('manual', pos: val);
-                        },
+                        onChanged: (val) => setState(() => _focusValue = val),
+                        onChangeEnd: (val) => piService.setFocus('manual', pos: val),
                       ),
 
                     const SizedBox(height: 20),
-                    const Text("Analysis Mode", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.blueAccent)),
+                    const Text("Analysis Priority", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blueAccent)),
                     const SizedBox(height: 10),
                     Wrap(
                       spacing: 8,
@@ -168,7 +170,6 @@ class _RaspberryPiScreenState extends State<RaspberryPiScreen> {
                         return ChoiceChip(
                           label: Text(mode.toUpperCase()),
                           selected: _selectedFruit == mode,
-                          selectedColor: Colors.blueAccent.withOpacity(0.3),
                           onSelected: (selected) {
                             if (selected) {
                               setState(() => _selectedFruit = mode);
@@ -184,8 +185,8 @@ class _RaspberryPiScreenState extends State<RaspberryPiScreen> {
                       width: double.infinity,
                       child: ElevatedButton.icon(
                         onPressed: piService.isConnected ? () => piService.triggerScan() : null,
-                        icon: const Icon(Icons.analytics),
-                        label: const Text("TRIGGER ANALYSIS NOW"),
+                        icon: const Icon(Icons.refresh),
+                        label: const Text("FORCE NEW SCAN"),
                         style: ElevatedButton.styleFrom(
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           backgroundColor: theme.primaryColor,
@@ -217,23 +218,18 @@ class _RaspberryPiScreenState extends State<RaspberryPiScreen> {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    Text(res.fruit.toUpperCase(), style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
                     Text(
-                      res.fruit.toUpperCase(),
-                      style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                    ),
-                    Text(
-                      res.isRotten ? "⚠️ ROTTEN DETECTED" : "✅ FRESH & HEALTHY",
+                      res.isRotten ? "⚠ ROTTEN DETECTED" : "✔ FRESH & HEALTHY",
                       style: TextStyle(
                         color: res.isRotten ? theme.colorScheme.error : theme.colorScheme.secondary,
                         fontWeight: FontWeight.bold,
+                        fontSize: 12,
                       ),
                     ),
                   ],
                 ),
-                Text(
-                  "${(res.confidence * 100).toStringAsFixed(1)}%",
-                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                ),
+                Text("${(res.confidence * 100).toStringAsFixed(0)}%", style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
               ],
             ),
             const Divider(height: 20),
@@ -255,9 +251,9 @@ class _RaspberryPiScreenState extends State<RaspberryPiScreen> {
   Widget _nutrientIcon(IconData icon, String value) {
     return Column(
       children: [
-        FaIcon(icon, size: 20, color: Colors.grey),
-        const SizedBox(height: 5),
-        Text(value, style: const TextStyle(fontWeight: FontWeight.bold)),
+        FaIcon(icon, size: 16, color: Colors.grey),
+        const SizedBox(height: 4),
+        Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
       ],
     );
   }
@@ -268,10 +264,7 @@ class _RaspberryPiScreenState extends State<RaspberryPiScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text("Pi 5 IP Address"),
-        content: TextField(
-          controller: controller,
-          decoration: const InputDecoration(hintText: "192.168.1.65"),
-        ),
+        content: TextField(controller: controller, decoration: const InputDecoration(hintText: "192.168.1.x")),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
           TextButton(

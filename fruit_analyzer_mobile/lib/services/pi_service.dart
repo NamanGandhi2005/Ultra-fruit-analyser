@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -42,6 +43,7 @@ class PiService extends ChangeNotifier {
   bool _isConnected = false;
   PiResult? _latestResult;
   Timer? _statusTimer;
+  Uint8List? _currentFrame;
 
   PiService() {
     _loadIp();
@@ -55,15 +57,26 @@ class PiService extends ChangeNotifier {
 
   bool get isConnected => _isConnected;
   PiResult? get latestResult => _latestResult;
+  Uint8List? get currentFrame => _currentFrame;
   String get ip => _ip;
   String get baseUrl => 'http://$_ip:5000';
-  
-  String _streamTimestamp = DateTime.now().millisecondsSinceEpoch.toString();
-  String get streamUrl => '$baseUrl/video_feed?t=$_streamTimestamp';
 
-  void refreshStream() {
-    _streamTimestamp = DateTime.now().millisecondsSinceEpoch.toString();
-    notifyListeners();
+  Future<void> fetchFrame() async {
+    if (!_isConnected) return;
+    try {
+      final response = await _dio.get('$baseUrl/latest_frame', 
+        options: Options(
+          responseType: ResponseType.bytes, 
+          receiveTimeout: const Duration(milliseconds: 1500),
+          sendTimeout: const Duration(milliseconds: 1000),
+        ));
+      if (response.statusCode == 200) {
+        _currentFrame = Uint8List.fromList(response.data);
+        notifyListeners();
+      }
+    } catch (e) {
+      // Quietly ignore frame fetch errors
+    }
   }
 
   void setIp(String newIp) {
