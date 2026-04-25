@@ -60,6 +60,7 @@ class _LoginScreenState extends State<LoginScreen> {
           }
 
           if (!mounted) return;
+          await prefs.setString('logged_in_user', username);
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(builder: (context) => HomeScreen(user: user!)),
@@ -123,6 +124,7 @@ class _LoginScreenState extends State<LoginScreen> {
         }
 
         if (!mounted) return;
+        await prefs.setString('logged_in_user', user.username);
         Navigator.pushReplacement(
           context,
           MaterialPageRoute(builder: (context) => HomeScreen(user: user!)),

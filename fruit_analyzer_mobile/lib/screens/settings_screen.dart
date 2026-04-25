@@ -81,32 +81,39 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final piService = Provider.of<PiService>(context, listen: false);
     final predictionService = Provider.of<PredictionService>(context, listen: false);
     
+    // Explicitly ask for all files or handle the extension check
     FilePickerResult? result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['pth'],
+      type: FileType.any, 
     );
 
     if (result != null) {
+      final fileName = result.files.single.name;
+      if (!fileName.endsWith('.pth')) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Please select a .pth file")));
+        return;
+      }
+
       setState(() => _isUploading = true);
       try {
-        final file = File(result.files.single.path!);
+        final filePath = result.files.single.path!;
         final formData = dio.FormData.fromMap({
-          'model': await dio.MultipartFile.fromFile(file.path, filename: result.files.single.name),
+          'model': await dio.MultipartFile.fromFile(filePath, filename: fileName),
         });
 
-        final response = await dio.Dio().post(
+        final uploadDio = dio.Dio();
+        final response = await uploadDio.post(
           '${piService.baseUrl}/upload_model',
           data: formData,
         );
 
         if (response.data['status'] == 'success') {
-          final onnxRes = await dio.Dio().get('${piService.baseUrl}/download_onnx', options: dio.Options(responseType: dio.ResponseType.bytes));
-          final infoRes = await dio.Dio().get('${piService.baseUrl}/download_info', options: dio.Options(responseType: dio.ResponseType.json));
+          final onnxRes = await uploadDio.get('${piService.baseUrl}/download_onnx', options: dio.Options(responseType: dio.ResponseType.bytes));
+          final infoRes = await uploadDio.get('${piService.baseUrl}/download_info', options: dio.Options(responseType: dio.ResponseType.json));
 
           await predictionService.updateModel(
             Uint8List.fromList(onnxRes.data),
             infoRes.data as Map<String, dynamic>,
-            result.files.single.name,
+            fileName,
           );
 
           if (mounted) {
