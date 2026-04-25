@@ -677,6 +677,9 @@ class _HomeScreenState extends State<HomeScreen> {
               padding: const EdgeInsets.all(12),
               children: [
                 _buildDrawerItem(Icons.analytics_outlined, "Analysis Insights", trailing: "${widget.user.analysisCount}"),
+                Consumer<PredictionService>(
+                  builder: (context, ps, _) => _buildDrawerItem(Icons.psychology_outlined, "Active Model", trailing: ps.activeModelName.split('.').first),
+                ),
                 _buildDrawerItem(Icons.settings_remote_rounded, "Pi 5 Remote Control", onTap: () {
                   Navigator.pop(context);
                   Navigator.push(context, MaterialPageRoute(builder: (context) => const RaspberryPiScreen()));

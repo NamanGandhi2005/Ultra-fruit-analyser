@@ -1,10 +1,14 @@
+import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:file_picker/file_picker.dart';
+import 'package:dio/dio.dart' as dio;
 import '../services/notification_service.dart';
 import '../services/theme_service.dart';
 import '../services/pi_service.dart';
-
+import '../services/prediction_service.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -25,6 +29,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _emailPassword = TextEditingController();
   bool _emailEnabled = false;
   final _piIp = TextEditingController();
+  bool _isUploading = false;
 
   @override
   void initState() {
@@ -61,163 +66,226 @@ class _SettingsScreenState extends State<SettingsScreen> {
       telegramChatId: _telegramChatId.text.trim(),
       telegramEnabled: _telegramEnabled,
       smtpServer: _smtpServer.text.trim(),
-      smtpPort: int.tryParse(_smtpPort.text.trim()) ?? 587,
+      smtpPort: int.tryParse(_smtpPort.text) ?? 587,
       email: _email.text.trim(),
       emailPassword: _emailPassword.text.trim(),
       emailEnabled: _emailEnabled,
     );
     await settings.save(prefs);
-    if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Settings saved!')));
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Settings Saved Successfully")));
+    }
+  }
+
+  Future<void> _pickAndUploadModel() async {
+    final piService = Provider.of<PiService>(context, listen: false);
+    final predictionService = Provider.of<PredictionService>(context, listen: false);
+    
+    FilePickerResult? result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['pth'],
+    );
+
+    if (result != null) {
+      setState(() => _isUploading = true);
+      try {
+        final file = File(result.files.single.path!);
+        final formData = dio.FormData.fromMap({
+          'model': await dio.MultipartFile.fromFile(file.path, filename: result.files.single.name),
+        });
+
+        final response = await dio.Dio().post(
+          '${piService.baseUrl}/upload_model',
+          data: formData,
+        );
+
+        if (response.data['status'] == 'success') {
+          final onnxRes = await dio.Dio().get('${piService.baseUrl}/download_onnx', options: dio.Options(responseType: dio.ResponseType.bytes));
+          final infoRes = await dio.Dio().get('${piService.baseUrl}/download_info', options: dio.Options(responseType: dio.ResponseType.json));
+
+          await predictionService.updateModel(
+            Uint8List.fromList(onnxRes.data),
+            infoRes.data as Map<String, dynamic>,
+            result.files.single.name,
+          );
+
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Model updated and converted successfully!")));
+          }
+        }
+      } catch (e) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Model update failed: $e")));
+        }
+      } finally {
+        if (mounted) setState(() => _isUploading = false);
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final themeService = Provider.of<ThemeService>(context);
-    final isDark = theme.brightness == Brightness.dark;
 
     return Scaffold(
-      backgroundColor: theme.scaffoldBackgroundColor,
       appBar: AppBar(
-        title: Text('SETTINGS', style: GoogleFonts.poppins(fontWeight: FontWeight.bold, fontSize: 16, letterSpacing: 2, color: theme.colorScheme.onSurface)),
-        backgroundColor: Colors.transparent,
-        iconTheme: IconThemeData(color: theme.colorScheme.onSurface),
+        title: Text("SETTINGS", style: GoogleFonts.poppins(fontWeight: FontWeight.bold, letterSpacing: 1.2)),
+        actions: [
+          IconButton(onPressed: _saveSettings, icon: const Icon(Icons.check_circle_outline, color: Colors.blueAccent)),
+        ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-        children: [
-          // Theme Section
-          _sectionHeader("APPEARANCE", Icons.palette_outlined),
-          Container(
-            decoration: BoxDecoration(
-              color: theme.cardTheme.color,
-              borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: theme.colorScheme.onSurface.withOpacity(0.05)),
-              boxShadow: [
-                if (!isDark) BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))
-              ],
-            ),
-            child: SwitchListTile(
-              secondary: Icon(themeService.isDarkMode ? Icons.dark_mode_rounded : Icons.light_mode_rounded, color: theme.colorScheme.primary),
-              title: Text("Dark Mode", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: theme.colorScheme.onSurface)),
-              subtitle: Text(themeService.isDarkMode ? "Enabled" : "Disabled", style: TextStyle(fontSize: 12, color: theme.colorScheme.onSurface.withOpacity(0.6))),
-              value: themeService.isDarkMode,
-              onChanged: (_) => themeService.toggleTheme(),
-            ),
-          ),
-          const SizedBox(height: 32),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _sectionHeader("APPEARANCE", Icons.palette_outlined),
+            _glassContainer([
+              ListTile(
+                title: const Text("Dark Mode", style: TextStyle(fontWeight: FontWeight.w500)),
+                trailing: Switch(
+                  value: themeService.isDarkMode,
+                  onChanged: (_) => themeService.toggleTheme(),
+                ),
+              ),
+            ]),
+            const SizedBox(height: 32),
 
-          // Pi Section
-          _sectionHeader("PI REMOTE CONFIG", Icons.memory_rounded),
-          _glassContainer([
-            _inputField(_piIp, "Pi IP Address (Port 5000)"),
-            const SizedBox(height: 8),
-            const Text("Default: 192.168.1.65", style: TextStyle(fontSize: 10, color: Colors.grey)),
-          ]),
-          const SizedBox(height: 32),
-
-          // Telegram Section
-          _sectionHeader("TELEGRAM NOTIFICATIONS", Icons.notifications_active_outlined),
-          _glassContainer([
-            _inputField(_telegramToken, "Bot Token", obscure: true),
-            const SizedBox(height: 16),
-            _inputField(_telegramChatId, "Chat ID"),
-            const SizedBox(height: 8),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text("Enable Alerts", style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: theme.colorScheme.onSurface)),
-              value: _telegramEnabled,
-              onChanged: (val) => setState(() => _telegramEnabled = val),
-            ),
-          ]),
-          const SizedBox(height: 32),
-
-          // Email Section
-          _sectionHeader("EMAIL SERVER", Icons.alternate_email_rounded),
-          _glassContainer([
-            _inputField(_smtpServer, "SMTP Host"),
-            const SizedBox(height: 16),
-            _inputField(_smtpPort, "Port"),
-            const SizedBox(height: 16),
-            _inputField(_email, "Email User"),
-            const SizedBox(height: 16),
-            _inputField(_emailPassword, "Password", obscure: true),
-            const SizedBox(height: 8),
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              title: Text("Enable Email Alerts", style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: theme.colorScheme.onSurface)),
-              value: _emailEnabled,
-              onChanged: (val) => setState(() => _emailEnabled = val),
-            ),
-          ]),
-          
-          const SizedBox(height: 48),
-          GestureDetector(
-            onTap: _saveSettings,
-            child: Container(
-              height: 60,
-              decoration: BoxDecoration(
-                gradient: LinearGradient(colors: [theme.colorScheme.primary, theme.colorScheme.secondary]),
-                borderRadius: BorderRadius.circular(20),
-                boxShadow: [
-                  BoxShadow(color: theme.colorScheme.primary.withOpacity(0.3), blurRadius: 20, offset: const Offset(0, 8))
+            _sectionHeader("🧠 AI MODEL MANAGEMENT", Icons.psychology_outlined),
+            _glassContainer([
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text("Active Model", style: TextStyle(fontSize: 12, color: Colors.grey)),
+                      Consumer<PredictionService>(
+                        builder: (context, ps, _) => Text(ps.activeModelName, 
+                          style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.blueAccent)),
+                      ),
+                    ],
+                  ),
+                  if (_isUploading)
+                    const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
+                  else
+                    TextButton.icon(
+                      onPressed: _pickAndUploadModel,
+                      icon: const Icon(Icons.upload_file),
+                      label: const Text("UPLOAD .PTH"),
+                    ),
                 ],
               ),
-              child: const Center(
-                child: Text("SAVE SETTINGS", style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 1.2)),
+              const SizedBox(height: 10),
+              const Text("Upload a PyTorch (.pth) model to the Pi for auto-conversion to ONNX.", 
+                style: TextStyle(fontSize: 10, color: Colors.white54)),
+              const Divider(height: 24),
+              SizedBox(
+                width: double.infinity,
+                child: OutlinedButton(
+                  onPressed: () async {
+                    await Provider.of<PredictionService>(context, listen: false).resetToDefault();
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Reset to default model.")));
+                    }
+                  },
+                  child: const Text("RESET TO DEFAULT MODEL"),
+                ),
               ),
-            ),
-          ),
-          const SizedBox(height: 40),
+            ]),
+            const SizedBox(height: 32),
+
+            _sectionHeader("🤖 PI REMOTE CONFIG", Icons.memory_rounded),
+            _glassContainer([
+              _inputField(_piIp, "Pi IP Address"),
+              const SizedBox(height: 8),
+              const Text("Required for model conversion. Default: 192.168.1.65", style: TextStyle(fontSize: 10, color: Colors.grey)),
+            ]),
+            const SizedBox(height: 32),
+
+            _sectionHeader("TELEGRAM NOTIFICATIONS", Icons.notifications_active_outlined),
+            _glassContainer([
+              _inputField(_telegramToken, "Bot Token", obscure: true),
+              const SizedBox(height: 16),
+              _inputField(_telegramChatId, "Chat ID"),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text("Enabled", style: TextStyle(fontWeight: FontWeight.w500)),
+                  Switch(value: _telegramEnabled, onChanged: (v) => setState(() => _telegramEnabled = v)),
+                ],
+              ),
+            ]),
+            const SizedBox(height: 32),
+
+            _sectionHeader("EMAIL ALERTS", Icons.email_outlined),
+            _glassContainer([
+              _inputField(_smtpServer, "SMTP Server (e.g. smtp.gmail.com)"),
+              const SizedBox(height: 16),
+              _inputField(_smtpPort, "Port (e.g. 587)"),
+              const SizedBox(height: 16),
+              _inputField(_email, "Email Address"),
+              const SizedBox(height: 16),
+              _inputField(_emailPassword, "App Password", obscure: true),
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text("Enabled", style: TextStyle(fontWeight: FontWeight.w500)),
+                  Switch(value: _emailEnabled, onChanged: (v) => setState(() => _emailEnabled = v)),
+                ],
+              ),
+            ]),
+            const SizedBox(height: 40),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _sectionHeader(String label, IconData icon) {
+    return Padding(
+      padding: const EdgeInsets.only(left: 4, bottom: 12),
+      child: Row(
+        children: [
+          Icon(icon, size: 18, color: Colors.blueAccent),
+          const SizedBox(width: 8),
+          Text(label, style: GoogleFonts.poppins(fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 1.1, color: Colors.grey)),
         ],
       ),
     );
   }
 
   Widget _glassContainer(List<Widget> children) {
-    final theme = Theme.of(context);
-    final isDark = theme.brightness == Brightness.dark;
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: theme.cardTheme.color,
-        borderRadius: BorderRadius.circular(32),
-        border: Border.all(color: theme.colorScheme.onSurface.withOpacity(0.05)),
-        boxShadow: [
-          if (!isDark) BoxShadow(color: Colors.black.withOpacity(0.05), blurRadius: 10, offset: const Offset(0, 4))
-        ],
+        color: Colors.white.withOpacity(0.03),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withOpacity(0.05)),
       ),
       child: Column(children: children),
-    );
-  }
-
-  Widget _sectionHeader(String title, IconData icon) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.only(left: 4, bottom: 12),
-      child: Text(title, style: GoogleFonts.poppins(fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.5, color: theme.colorScheme.onSurface.withOpacity(0.6))),
     );
   }
 
   Widget _inputField(TextEditingController controller, String label, {bool obscure = false}) {
     final theme = Theme.of(context);
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
       decoration: BoxDecoration(
-        color: theme.colorScheme.onSurface.withOpacity(0.03),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: theme.colorScheme.onSurface.withOpacity(0.05)),
+        color: Colors.black.withOpacity(0.2),
+        borderRadius: BorderRadius.circular(12),
       ),
       child: TextField(
         controller: controller,
         obscureText: obscure,
-        style: TextStyle(fontSize: 14, color: theme.colorScheme.onSurface),
+        style: const TextStyle(fontSize: 14),
         decoration: InputDecoration(
           labelText: label,
           labelStyle: TextStyle(color: theme.colorScheme.onSurface.withOpacity(0.6), fontSize: 12),
           border: InputBorder.none,
-          contentPadding: const EdgeInsets.symmetric(vertical: 12),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         ),
       ),
     );

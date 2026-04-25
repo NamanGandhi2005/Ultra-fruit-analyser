@@ -10,8 +10,50 @@ from PIL import Image
 from datetime import datetime
 import requests
 import threading
-from flask import Flask, Response, request, jsonify
+from flask import Flask, Response, request, jsonify, send_file
 from flask_cors import CORS
+
+# ... existing Flask setup ...
+
+@app.route('/upload_model', methods=['POST'])
+def upload_model():
+    if 'model' not in request.files:
+        return jsonify({"status": "error", "message": "No model file provided"}), 400
+    
+    file = request.files['model']
+    if not file.filename.endswith('.pth'):
+        return jsonify({"status": "error", "message": "Only .pth files allowed"}), 400
+
+    temp_path = "uploaded_model.pth"
+    file.save(temp_path)
+    
+    try:
+        from export_to_onnx import export_model
+        onnx_path = "converted_model.onnx"
+        info_path = "converted_model_info.json"
+        export_model(temp_path, onnx_path, info_path)
+        
+        # In a real app we might return paths or IDs, here we'll just signal success
+        # and let the app download them.
+        return jsonify({
+            "status": "success", 
+            "message": "Model converted successfully",
+            "model_name": file.filename
+        })
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)}), 500
+
+@app.route('/download_onnx')
+def download_onnx():
+    if os.path.exists("converted_model.onnx"):
+        return send_file("converted_model.onnx", as_attachment=True)
+    return "Not found", 404
+
+@app.route('/download_info')
+def download_info():
+    if os.path.exists("converted_model_info.json"):
+        return send_file("converted_model_info.json", as_attachment=True)
+    return "Not found", 404
 
 # --- Flask Server for Remote Monitoring ---
 app = Flask(__name__)

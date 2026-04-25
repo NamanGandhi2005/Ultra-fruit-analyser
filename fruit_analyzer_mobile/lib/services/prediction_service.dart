@@ -5,6 +5,8 @@ import 'dart:typed_data';
 import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:onnxruntime/onnxruntime.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:path_provider/path_provider.dart';
 
 class PredictionResult {
   final String fruit;
@@ -33,26 +35,78 @@ class PredictionService {
   Map<String, dynamic>? _nutrientDb;
   Map<String, dynamic>? _modelInfo;
   bool _isInitialized = false;
+  String _activeModelName = "Default ResNet18";
 
   bool get isInitialized => _isInitialized;
+  String get activeModelName => _activeModelName;
 
   Future<void> init() async {
     if (_isInitialized) return;
 
-    // Load ONNX Model
-    final byteData = await rootBundle.load('assets/model/fruit_model.onnx');
-    final modelBytes = byteData.buffer.asUint8List();
-    final options = OrtSessionOptions();
-    _session = OrtSession.fromBuffer(modelBytes, options);
+    final prefs = await SharedPreferences.getInstance();
+    final customModelPath = prefs.getString('custom_model_path');
+    final customInfoPath = prefs.getString('custom_info_path');
+    _activeModelName = prefs.getString('active_model_name') ?? "Default ResNet18";
 
-    // Load Databases
+    if (customModelPath != null && File(customModelPath).existsSync() &&
+        customInfoPath != null && File(customInfoPath).existsSync()) {
+      try {
+        final modelBytes = await File(customModelPath).readAsBytes();
+        _session = OrtSession.fromBuffer(modelBytes, OrtSessionOptions());
+        _modelInfo = json.decode(await File(customInfoPath).readAsString());
+      } catch (e) {
+        print("Error loading custom model: $e");
+        await _loadDefaultModel();
+      }
+    } else {
+      await _loadDefaultModel();
+    }
+
+    // Load Nutrient DB (constant across models)
     final nutrientsJson = await rootBundle.loadString('assets/data/nutrients.json');
     _nutrientDb = json.decode(nutrientsJson);
 
+    _isInitialized = true;
+  }
+
+  Future<void> _loadDefaultModel() async {
+    final byteData = await rootBundle.load('assets/model/fruit_model.onnx');
+    final modelBytes = byteData.buffer.asUint8List();
+    _session = OrtSession.fromBuffer(modelBytes, OrtSessionOptions());
+
     final infoJson = await rootBundle.loadString('assets/data/model_info.json');
     _modelInfo = json.decode(infoJson);
+    _activeModelName = "Default ResNet18";
+  }
 
-    _isInitialized = true;
+  Future<void> updateModel(Uint8List onnxBytes, Map<String, dynamic> info, String name) async {
+    final directory = await getApplicationDocumentsDirectory();
+    final modelFile = File('${directory.path}/custom_model.onnx');
+    final infoFile = File('${directory.path}/custom_info.json');
+
+    await modelFile.writeAsBytes(onnxBytes);
+    await infoFile.writeAsString(json.encode(info));
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('custom_model_path', modelFile.path);
+    await prefs.setString('custom_info_path', infoFile.path);
+    await prefs.setString('active_model_name', name);
+
+    _session?.release();
+    _session = OrtSession.fromBuffer(onnxBytes, OrtSessionOptions());
+    _modelInfo = info;
+    _activeModelName = name;
+  }
+
+  Future<void> resetToDefault() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('custom_model_path');
+    await prefs.remove('custom_info_path');
+    await prefs.remove('active_model_name');
+    
+    _session?.release();
+    _isInitialized = false;
+    await init();
   }
 
   // --- PORTED CV LOGIC ---
@@ -63,7 +117,6 @@ class PredictionService {
     int totalPixels = image.width * image.height;
 
     for (var pixel in image) {
-      // Get HSV-like values (simplified for performance)
       double r = pixel.r / 255.0;
       double g = pixel.g / 255.0;
       double b = pixel.b / 255.0;
@@ -84,18 +137,12 @@ class PredictionService {
       double s = maxVal == 0 ? 0 : delta / maxVal;
       double v = maxVal;
 
-      // Brown check: (h >= 5) & (h <= 30) & (s >= 0.3) & (v <= 0.6) 
-      // Note: Python s/v are 0-255, here 0-1.
       if (h >= 5 && h <= 35 && s >= 0.3 && v <= 0.6) {
         brownCount++;
       }
-      
-      // Dark check: v < 0.15
       if (v < 0.15) {
         darkCount++;
       }
-
-      // Mold check: (h >= 75) & (h <= 105) & (s >= 0.2) & (v >= 0.2)
       if (h >= 75 && h <= 105 && s >= 0.2 && v >= 0.2) {
         moldCount++;
       }
@@ -105,7 +152,6 @@ class PredictionService {
     double darkRatio = darkCount / totalPixels;
     double moldRatio = moldCount / totalPixels;
 
-    print("CV Debug -> Brown: $brownRatio, Dark: $darkRatio, Mold: $moldRatio");
     return (brownRatio >= brownThreshold) || (darkRatio >= darkThreshold) || (moldRatio >= 0.05);
   }
 
@@ -116,27 +162,19 @@ class PredictionService {
     final rawImage = img.decodeImage(imageBytes);
     if (rawImage == null) return null;
 
-    // --- TTA (Test-Time Augmentation) ---
-    // 1. Original
     final imgOrig = img.copyResize(rawImage, width: 224, height: 224);
     final inputOrig = _preprocess(imgOrig);
-
-    // 2. Flipped
     final imgFlip = img.copyFlip(imgOrig, direction: img.FlipDirection.horizontal);
     final inputFlip = _preprocess(imgFlip);
 
-    // Run Inference for both
     final runOptions = OrtRunOptions();
     final outputOrig = _session!.run(runOptions, {'input': _createTensor(inputOrig)});
     final outputFlip = _session!.run(runOptions, {'input': _createTensor(inputFlip)});
 
     final probsOrig = (outputOrig[0]?.value as List<List<double>>)[0];
     final probsFlip = (outputFlip[0]?.value as List<List<double>>)[0];
-
-    // Average Probabilities
     List<double> avgProbs = List.generate(probsOrig.length, (i) => (probsOrig[i] + probsFlip[i]) / 2.0);
 
-    // Filter by selected fruit
     if (selectedFruit != 'auto') {
       double sum = 0;
       for (int i = 0; i < avgProbs.length; i++) {
@@ -151,7 +189,6 @@ class PredictionService {
       }
     }
 
-    // Get Top Prediction
     int bestIdx = 0;
     double maxProb = -1.0;
     for (int i = 0; i < avgProbs.length; i++) {
@@ -164,21 +201,15 @@ class PredictionService {
     String finalLabel = _modelInfo!['class_names'][bestIdx];
     double finalConf = maxProb;
 
-    // Parse label
     final parts = finalLabel.split('_stage_');
     String fruit = parts[0];
     int stage = int.parse(parts[1]);
 
-    // CV Check
     bool isRottenCVDetected = isRottenCV(imgOrig);
-    
-    // Smart Correction V6
     bool dbSaysRotten = _nutrientDb![fruit][stage.toString()]['rotten'];
     
     if (dbSaysRotten && !isRottenCVDetected && finalConf < 0.95) {
-      // Look for a fresh alternative of the same fruit
       double requiredFreshConf = finalConf < 0.60 ? 0.15 : 0.30;
-      
       int bestFreshIdx = -1;
       double bestFreshConf = -1.0;
 
