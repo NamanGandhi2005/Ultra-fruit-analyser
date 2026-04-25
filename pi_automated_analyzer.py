@@ -36,7 +36,8 @@ def upload_model():
     if not file.filename.endswith('.pth'):
         return jsonify({"status": "error", "message": "Only .pth files allowed"}), 400
 
-    temp_path = "uploaded_model.pth"
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    temp_path = os.path.join(base_dir, "uploaded_model.pth")
     file.save(temp_path)
     
     try:
@@ -45,28 +46,34 @@ def upload_model():
         importlib.reload(export_to_onnx)
         from export_to_onnx import export_model
         
-        onnx_path = "converted_model.onnx"
-        info_path = "converted_model_info.json"
+        onnx_path = os.path.join(base_dir, "converted_model.onnx")
+        info_path = os.path.join(base_dir, "converted_model_info.json")
         export_model(temp_path, onnx_path, info_path)
         
+        print(f"✅ Conversion complete: {onnx_path}")
         return jsonify({
             "status": "success", 
             "message": "Model converted successfully",
             "model_name": file.filename
         })
     except Exception as e:
+        print(f"❌ Conversion failed: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/download_onnx')
 def download_onnx():
-    if os.path.exists("converted_model.onnx"):
-        return send_file("converted_model.onnx", as_attachment=True)
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(base_dir, "converted_model.onnx")
+    if os.path.exists(path):
+        return send_file(path, as_attachment=True)
     return "Not found", 404
 
 @app.route('/download_info')
 def download_info():
-    if os.path.exists("converted_model_info.json"):
-        return send_file("converted_model_info.json", as_attachment=True)
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    path = os.path.join(base_dir, "converted_model_info.json")
+    if os.path.exists(path):
+        return send_file(path, as_attachment=True)
     return "Not found", 404
 
 @app.route('/video_feed')

@@ -100,7 +100,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           'model': await dio.MultipartFile.fromFile(filePath, filename: fileName),
         });
 
-        final uploadDio = dio.Dio();
+        // Use a longer timeout for conversion
+        final uploadDio = dio.Dio(dio.BaseOptions(
+          connectTimeout: const Duration(seconds: 10),
+          sendTimeout: const Duration(seconds: 60),
+          receiveTimeout: const Duration(seconds: 60),
+        ));
+        
         final response = await uploadDio.post(
           '${piService.baseUrl}/upload_model',
           data: formData,
