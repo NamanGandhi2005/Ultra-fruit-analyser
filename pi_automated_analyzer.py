@@ -40,7 +40,11 @@ def upload_model():
     file.save(temp_path)
     
     try:
+        import importlib
+        import export_to_onnx
+        importlib.reload(export_to_onnx)
         from export_to_onnx import export_model
+        
         onnx_path = "converted_model.onnx"
         info_path = "converted_model_info.json"
         export_model(temp_path, onnx_path, info_path)
