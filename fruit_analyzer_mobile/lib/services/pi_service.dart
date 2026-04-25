@@ -57,7 +57,14 @@ class PiService extends ChangeNotifier {
   PiResult? get latestResult => _latestResult;
   String get ip => _ip;
   String get baseUrl => 'http://$_ip:5000';
-  String get streamUrl => '$baseUrl/video_feed?t=${DateTime.now().millisecondsSinceEpoch}';
+  
+  String _streamTimestamp = DateTime.now().millisecondsSinceEpoch.toString();
+  String get streamUrl => '$baseUrl/video_feed?t=$_streamTimestamp';
+
+  void refreshStream() {
+    _streamTimestamp = DateTime.now().millisecondsSinceEpoch.toString();
+    notifyListeners();
+  }
 
   void setIp(String newIp) {
     _ip = newIp;

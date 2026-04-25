@@ -53,7 +53,6 @@ class _RaspberryPiScreenState extends State<RaspberryPiScreen> {
                 if (piService.isConnected)
                   Image.network(
                     piService.streamUrl,
-                    key: UniqueKey(), 
                     fit: BoxFit.cover,
                     width: double.infinity,
                     gaplessPlayback: true,
@@ -70,7 +69,7 @@ class _RaspberryPiScreenState extends State<RaspberryPiScreen> {
                             const Icon(Icons.error_outline, color: Colors.red, size: 40),
                             const Text("Stream Unavailable", style: TextStyle(color: Colors.white)),
                             TextButton(
-                              onPressed: () => setState(() {}), 
+                              onPressed: () => piService.refreshStream(), 
                               child: const Text("Retry Stream")
                             )
                           ],
