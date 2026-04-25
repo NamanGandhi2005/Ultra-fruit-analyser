@@ -55,7 +55,7 @@ def export_model(model_path='fruit_resnet_model.pth', onnx_path='fruit_model.onn
         dummy_input,
         onnx_path,
         export_params=True,
-        opset_version=12,
+        opset_version=17,
         do_constant_folding=True,
         input_names=['input'],
         output_names=['output'],
