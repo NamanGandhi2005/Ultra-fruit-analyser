@@ -17,6 +17,7 @@ import '../models/scan_model.dart';
 import 'login_screen.dart';
 import 'settings_screen.dart';
 import 'history_screen.dart';
+import 'raspberry_pi_screen.dart';
 import 'scanning_overlay.dart';
 import 'recipe_list_widget.dart';
 
@@ -676,6 +677,10 @@ class _HomeScreenState extends State<HomeScreen> {
               padding: const EdgeInsets.all(12),
               children: [
                 _buildDrawerItem(Icons.analytics_outlined, "Analysis Insights", trailing: "${widget.user.analysisCount}"),
+                _buildDrawerItem(Icons.settings_remote_rounded, "Pi 5 Remote Control", onTap: () {
+                  Navigator.pop(context);
+                  Navigator.push(context, MaterialPageRoute(builder: (context) => const RaspberryPiScreen()));
+                }),
                 _buildDrawerItem(Icons.history_rounded, "Scan History", onTap: () {
                   Navigator.pop(context);
                   if (widget.user.isGuest) {

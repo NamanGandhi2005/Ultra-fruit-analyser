@@ -5,6 +5,9 @@ import 'package:firebase_core/firebase_core.dart';
 import 'services/prediction_service.dart';
 import 'services/notification_service.dart';
 import 'services/theme_service.dart';
+import 'services/pi_service.dart';
+import 'services/database_service.dart';
+import 'services/cloud_service.dart';
 import 'screens/login_screen.dart';
 
 void main() async {
@@ -18,6 +21,9 @@ void main() async {
     MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => ThemeService()),
+        ChangeNotifierProvider(create: (_) => PiService()),
+        Provider(create: (_) => DatabaseService()),
+        Provider(create: (_) => CloudService()),
         Provider.value(value: predictionService),
         Provider(create: (_) => NotificationService()),
       ],

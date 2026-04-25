@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/notification_service.dart';
 import '../services/theme_service.dart';
+import '../services/pi_service.dart';
 
 import 'package:google_fonts/google_fonts.dart';
 
@@ -23,6 +24,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _email = TextEditingController();
   final _emailPassword = TextEditingController();
   bool _emailEnabled = false;
+  final _piIp = TextEditingController();
 
   @override
   void initState() {
@@ -32,6 +34,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
+    final piService = Provider.of<PiService>(context, listen: false);
     final settings = NotificationSettings.fromPrefs(prefs);
     setState(() {
       _telegramToken.text = settings.telegramToken;
@@ -42,11 +45,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _email.text = settings.email;
       _emailPassword.text = settings.emailPassword;
       _emailEnabled = settings.emailEnabled;
+      _piIp.text = prefs.getString('pi_ip') ?? piService.ip;
     });
   }
 
   Future<void> _saveSettings() async {
     final prefs = await SharedPreferences.getInstance();
+    final piService = Provider.of<PiService>(context, listen: false);
+
+    await prefs.setString('pi_ip', _piIp.text.trim());
+    piService.setIp(_piIp.text.trim());
+
     final settings = NotificationSettings(
       telegramToken: _telegramToken.text.trim(),
       telegramChatId: _telegramChatId.text.trim(),
@@ -97,6 +106,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
               onChanged: (_) => themeService.toggleTheme(),
             ),
           ),
+          const SizedBox(height: 32),
+
+          // Pi Section
+          _sectionHeader("PI REMOTE CONFIG", Icons.memory_rounded),
+          _glassContainer([
+            _inputField(_piIp, "Pi IP Address (Port 5000)"),
+            const SizedBox(height: 8),
+            const Text("Default: 192.168.1.65", style: TextStyle(fontSize: 10, color: Colors.grey)),
+          ]),
           const SizedBox(height: 32),
 
           // Telegram Section
