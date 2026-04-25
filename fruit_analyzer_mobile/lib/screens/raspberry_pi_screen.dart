@@ -56,10 +56,6 @@ class _RaspberryPiScreenState extends State<RaspberryPiScreen> {
                     fit: BoxFit.cover,
                     width: double.infinity,
                     gaplessPlayback: true,
-                    loadingBuilder: (context, child, loadingProgress) {
-                      if (loadingProgress == null) return child;
-                      return const Center(child: Text("Connecting to Stream...", style: TextStyle(color: Colors.white, fontSize: 12)));
-                    },
                     errorBuilder: (context, error, stackTrace) => Container(
                       color: Colors.black,
                       child: Center(

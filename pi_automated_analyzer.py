@@ -29,13 +29,13 @@ remote_state = {
 
 @app.route('/video_feed')
 def video_feed():
-    print("📡 Remote command: Video feed requested")
     def generate():
         while True:
-            if remote_state["current_frame"] is not None:
+            frame = remote_state.get("current_frame")
+            if frame is not None:
                 yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + remote_state["current_frame"] + b'\r\n')
-            time.sleep(0.05) # ~20 FPS limit for bandwidth efficiency
+                       b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+            time.sleep(0.05)
     return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 @app.route('/set_fruit', methods=['POST'])
