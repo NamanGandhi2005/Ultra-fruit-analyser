@@ -8,5 +8,7 @@ RPLCD
 smbus2
 flask
 flask-cors
+onnx
+onnxscript
 # Note: picamera2 is usually pre-installed on Raspberry Pi OS Bookworm
 # If not, use: sudo apt install python3-picamera2
