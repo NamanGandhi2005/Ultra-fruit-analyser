@@ -13,7 +13,19 @@ import threading
 from flask import Flask, Response, request, jsonify, send_file
 from flask_cors import CORS
 
-# ... existing Flask setup ...
+# --- Flask Server for Remote Monitoring ---
+app = Flask(__name__)
+CORS(app)
+
+# Global state for remote access
+remote_state = {
+    "current_frame": None,
+    "manual_fruit": "auto",
+    "trigger_scan": False,
+    "last_result": None,
+    "focus_mode": "auto", # auto or manual
+    "lens_pos": 0.0
+}
 
 @app.route('/upload_model', methods=['POST'])
 def upload_model():
@@ -33,8 +45,6 @@ def upload_model():
         info_path = "converted_model_info.json"
         export_model(temp_path, onnx_path, info_path)
         
-        # In a real app we might return paths or IDs, here we'll just signal success
-        # and let the app download them.
         return jsonify({
             "status": "success", 
             "message": "Model converted successfully",
@@ -54,20 +64,6 @@ def download_info():
     if os.path.exists("converted_model_info.json"):
         return send_file("converted_model_info.json", as_attachment=True)
     return "Not found", 404
-
-# --- Flask Server for Remote Monitoring ---
-app = Flask(__name__)
-CORS(app)
-
-# Global state for remote access
-remote_state = {
-    "current_frame": None,
-    "manual_fruit": "auto",
-    "trigger_scan": False,
-    "last_result": None,
-    "focus_mode": "auto", # auto or manual
-    "lens_pos": 0.0
-}
 
 @app.route('/video_feed')
 def video_feed():
@@ -110,7 +106,6 @@ def trigger_scan():
 
 @app.route('/status')
 def get_status():
-    # Ensure last_result is JSON serializable
     return jsonify({
         "manual_fruit": str(remote_state["manual_fruit"]),
         "last_result": remote_state["last_result"],
@@ -149,57 +144,47 @@ class NotificationManager:
         except: pass
         return default
 
-    def send_telegram_alert(self, message, image_path=None):
-        if not self.telegram_config.get('enabled'): return False
-        try:
-            bot_token = self.telegram_config['bot_token']
-            chat_id = self.telegram_config['chat_id']
-            if image_path and os.path.exists(image_path):
-                url = f"https://api.telegram.org/bot{bot_token}/sendPhoto"
-                with open(image_path, 'rb') as f:
-                    requests.post(url, files={'photo': f}, data={'chat_id': chat_id, 'caption': message})
-            else:
-                url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
-                requests.post(url, data={'chat_id': chat_id, 'text': message})
-            return True
-        except: return False
-
 # ----------------------------
-# 2. FRUIT PREDICTOR
+# 2. MACHINE LEARNING LOGIC
 # ----------------------------
 class FruitPredictor:
-    def __init__(self, model_path='fruit_resnet_model.pth'):
+    def __init__(self, model_path='fruit_efficientnet_b0.pth'):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = None
-        self.class_names = []
-        self.load_model(model_path)
-        self.load_nutrients()
-
-    def load_model(self, model_path):
-        checkpoint = torch.load(model_path, map_location=self.device)
-        self.class_names = checkpoint['class_names']
-        num_classes = checkpoint['num_classes']
-        self.model = models.resnet18(weights=None)
-        self.model.fc = nn.Linear(self.model.fc.in_features, num_classes)
-        self.model.load_state_dict(checkpoint['model_state_dict'])
-        self.model.to(self.device).eval()
-
-    def load_nutrients(self):
+        print(f"🧠 ML Engine: Using {self.device}")
+        
+        # Load Nutrient Database
         try:
-            with open('nutrients.json', 'r') as f: self.NUTRIENT_DB = json.load(f)
+            with open('nutrients.json', 'r') as f:
+                self.NUTRIENT_DB = json.load(f)
         except: self.NUTRIENT_DB = {}
 
+        # Load Model
+        try:
+            checkpoint = torch.load(model_path, map_location=self.device)
+            self.class_names = checkpoint['class_names']
+            num_classes = len(self.class_names)
+            
+            # Recreate EfficientNet B0 architecture
+            self.model = models.efficientnet_b0(weights=None)
+            self.model.classifier[1] = nn.Linear(self.model.classifier[1].in_features, num_classes)
+            self.model.load_state_dict(checkpoint['model_state_dict'])
+            self.model.to(self.device)
+            self.model.eval()
+            print(f"✅ Model loaded: {model_path} ({num_classes} classes)")
+        except Exception as e:
+            print(f"❌ ML Load Error: {e}")
+            self.model = None
+
     def is_rotten(self, image_path):
+        """Simple CV check for brown/dark spots"""
         try:
             img = cv2.imread(image_path)
-            if img is None: return False
-            img_hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-            h, s, v = cv2.split(img_hsv)
+            hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+            h, s, v = cv2.split(hsv)
             brown_mask = ((h >= 5) & (h <= 35) & (s >= 50) & (v <= 180))
             brown_ratio = np.sum(brown_mask) / (img.shape[0] * img.shape[1])
             dark_mask = (v < 35)
             dark_ratio = np.sum(dark_mask) / (img.shape[0] * img.shape[1])
-            # Cast to standard bool for JSON
             return bool((brown_ratio >= 0.35) or (dark_ratio >= 0.50))
         except: return False
 
@@ -270,7 +255,6 @@ class PiFruitAnalyzer:
         if HAS_PICAMERA:
             try:
                 self.camera = Picamera2()
-                # High quality config
                 config = self.camera.create_preview_configuration(main={"size": (1280, 720), "format": "XBGR8888"})
                 self.camera.configure(config)
                 self.camera.start()
@@ -297,10 +281,9 @@ class PiFruitAnalyzer:
         
         while self.running:
             try:
-                # Handle Dynamic Focus Control
                 if HAS_PICAMERA and hasattr(self.camera, 'set_controls'):
                     if remote_state["focus_mode"] != last_focus_mode:
-                        mode = 2 if remote_state["focus_mode"] == "auto" else 0 # 2=Continuous, 0=Manual
+                        mode = 2 if remote_state["focus_mode"] == "auto" else 0
                         self.camera.set_controls({"AfMode": mode})
                         last_focus_mode = remote_state["focus_mode"]
                     
@@ -316,7 +299,6 @@ class PiFruitAnalyzer:
                     if not ret: continue
 
                 self.frame_buffer = frame
-                # Resize for MJPEG stream to save bandwidth and improve compatibility
                 stream_frame = cv2.resize(frame, (640, 480))
                 ret, buffer = cv2.imencode('.jpg', stream_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
                 if ret: remote_state["current_frame"] = buffer.tobytes()
