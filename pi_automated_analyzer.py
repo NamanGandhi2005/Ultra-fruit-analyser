@@ -29,13 +29,13 @@ remote_state = {
 
 @app.route('/video_feed')
 def video_feed():
+    print("📡 Remote command: Video feed requested")
     def generate():
         while True:
             if remote_state["current_frame"] is not None:
-                frame = remote_state["current_frame"]
                 yield (b'--frame\r\n'
-                       b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-            time.sleep(0.04)
+                       b'Content-Type: image/jpeg\r\n\r\n' + remote_state["current_frame"] + b'\r\n')
+            time.sleep(0.05) # ~20 FPS limit for bandwidth efficiency
     return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
 @app.route('/set_fruit', methods=['POST'])
@@ -267,8 +267,9 @@ class PiFruitAnalyzer:
                     if not ret: continue
 
                 self.frame_buffer = frame
-                # High quality encode
-                ret, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+                # Resize for MJPEG stream to save bandwidth and improve compatibility
+                stream_frame = cv2.resize(frame, (640, 480))
+                ret, buffer = cv2.imencode('.jpg', stream_frame, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
                 if ret: remote_state["current_frame"] = buffer.tobytes()
                 time.sleep(0.01)
             except: time.sleep(1)
