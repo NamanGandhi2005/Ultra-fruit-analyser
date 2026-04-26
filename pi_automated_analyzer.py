@@ -10,6 +10,7 @@ from PIL import Image
 from datetime import datetime
 import requests
 import threading
+from collections import deque
 from flask import Flask, Response, request, jsonify, send_file
 from flask_cors import CORS
 
@@ -255,96 +256,73 @@ class FruitPredictor:
             return False
 
     def predict(self, image_path):
-        """Inference with TTA (Test-Time Augmentation) and ROI Focus"""
-        # 1. Standard Transforms
+        """Inference with 4-Way TTA (Original, H-Flip, V-Flip, 180-Rot)"""
         transform = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
-        
-        # 2. Flipped Transform for TTA
-        flip_transform = transforms.Compose([
-            transforms.Resize((224, 224)),
-            transforms.RandomHorizontalFlip(p=1.0),
-            transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-        ])
 
-        raw_image = Image.open(image_path).convert('RGB')
-        
-        # Crop center square to focus on fruit (ROI)
-        w, h = raw_image.size
-        crop_size = min(w, h, 400)
-        left = (w - crop_size)/2
-        top = (h - crop_size)/2
-        right = (w + crop_size)/2
-        bottom = (h + crop_size)/2
-        roi_image = raw_image.crop((left, top, right, bottom))
+        try:
+            raw_image = Image.open(image_path).convert('RGB')
+            w, h = raw_image.size
+            crop_size = min(w, h, 400)
+            roi_image = raw_image.crop(((w-crop_size)//2, (h-crop_size)//2, (w+crop_size)//2, (h+crop_size)//2))
 
-        # Create batch: [Original ROI, Flipped ROI]
-        img_tensors = torch.stack([
-            transform(roi_image),
-            flip_transform(roi_image)
-        ]).to(self.device)
+            # Create TTA Batch: [Original, H-Flip, V-Flip, 180-Rot]
+            img_org = transform(roi_image)
+            img_h = transform(roi_image.transpose(Image.FLIP_LEFT_RIGHT))
+            img_v = transform(roi_image.transpose(Image.FLIP_TOP_BOTTOM))
+            img_r = transform(roi_image.rotate(180))
 
-        with torch.no_grad():
-            outputs = self.model(img_tensors)
-            probs = torch.nn.functional.softmax(outputs, dim=1)
+            img_tensors = torch.stack([img_org, img_h, img_v, img_r]).to(self.device)
+
+            with torch.no_grad():
+                outputs = self.model(img_tensors)
+                probs = torch.nn.functional.softmax(outputs, dim=1)
+                avg_probs = torch.mean(probs, dim=0) # Average across TTA batch
+                
+                target_fruit = remote_state["manual_fruit"].lower()
+                if target_fruit != "auto":
+                    mask = torch.tensor([1.0 if target_fruit in c.lower() else 0.0 for c in self.class_names], device=self.device)
+                    if mask.sum() > 0:
+                        avg_probs = avg_probs * mask
+                        if avg_probs.sum() > 0: avg_probs /= avg_probs.sum()
+
+                conf, idx = torch.max(avg_probs, 0)
             
-            # TTA: Average probabilities
-            avg_probs = torch.mean(probs, dim=0)
+            label = self.class_names[idx.item()]
+            parts = label.split('_stage_')
+            fruit = parts[0] if len(parts) == 2 else label.split('_')[0]
+            stage = parts[1] if len(parts) == 2 else "1"
+
+            rotten_cv = self.is_rotten(image_path)
+            fruit_db = self.NUTRIENT_DB.get(fruit.lower(), {})
+            stage_info = fruit_db.get(str(stage), {})
+            rotten_db = stage_info.get('rotten', False)
             
-            # Filtering by manual fruit if selected
-            target_fruit = remote_state["manual_fruit"].lower()
-            if target_fruit != "auto":
-                mask = torch.tensor([1.0 if target_fruit in c.lower() else 0.0 for c in self.class_names], device=self.device)
-                if mask.sum() > 0:
-                    avg_probs = avg_probs * mask
-                    if avg_probs.sum() > 0: avg_probs = avg_probs / avg_probs.sum()
+            if rotten_db and not rotten_cv and conf < 0.85:
+                # Same Smart Correction as before...
+                fresh_idx, max_fresh_prob = -1, -1
+                for i, name in enumerate(self.class_names):
+                    if name.startswith(fruit):
+                        s_id = name.split('_stage_')[1] if '_stage_' in name else "1"
+                        if not fruit_db.get(s_id, {}).get('rotten', False):
+                            if avg_probs[i] > max_fresh_prob:
+                                max_fresh_prob = avg_probs[i]; fresh_idx = i
+                
+                if fresh_idx != -1 and max_fresh_prob > (conf * 0.7):
+                    label = self.class_names[fresh_idx]; stage = label.split('_stage_')[1] if '_stage_' in label else "1"
+                    conf = max_fresh_prob; rotten_db = False
 
-            conf, idx = torch.max(avg_probs, 0)
-            
-        label = self.class_names[idx.item()]
-        parts = label.split('_stage_')
-        fruit = parts[0] if len(parts) == 2 else label.split('_')[0]
-        stage = parts[1] if len(parts) == 2 else "1"
-
-        rotten_cv = self.is_rotten(image_path)
-        fruit_db = self.NUTRIENT_DB.get(fruit.lower(), {})
-        stage_info = fruit_db.get(str(stage), {})
-        rotten_db = stage_info.get('rotten', False)
-        
-        # Smart Correction: If AI says rotten but CV says fresh, check confidence
-        if rotten_db and not rotten_cv and conf < 0.90:
-            # Look for highest fresh stage of same fruit
-            fresh_idx = -1
-            max_fresh_prob = -1
-            for i, name in enumerate(self.class_names):
-                if name.startswith(fruit):
-                    s_id = name.split('_stage_')[1] if '_stage_' in name else "1"
-                    if not fruit_db.get(s_id, {}).get('rotten', False):
-                        if avg_probs[i] > max_fresh_prob:
-                            max_fresh_prob = avg_probs[i]
-                            fresh_idx = i
-            
-            if fresh_idx != -1 and max_fresh_prob > (conf * 0.6):
-                print(f"✨ Smart Correction: Switched to fresh stage {self.class_names[fresh_idx]} ({max_fresh_prob:.1%})")
-                label = self.class_names[fresh_idx]
-                stage = label.split('_stage_')[1] if '_stage_' in label else "1"
-                conf = max_fresh_prob
-                rotten_db = False
-
-        is_rotten = bool(rotten_db or rotten_cv)
-
-        return {
-            'fruit': str(fruit.capitalize()),
-            'stage': str(stage),
-            'name': str(stage_info.get('name', 'Unidentified')),
-            'confidence': float(conf.item()),
-            'is_rotten': is_rotten,
-            'nutrients': stage_info if not is_rotten else None
-        }
+            return {
+                'fruit': fruit.capitalize(), 'stage': str(stage), 'name': stage_info.get('name', 'Unidentified'),
+                'confidence': float(conf.item()), 'is_rotten': bool(rotten_db or rotten_cv),
+                'nutrients': stage_info if not bool(rotten_db or rotten_cv) else None,
+                'timestamp': datetime.now().strftime("%H:%M:%S")
+            }
+        except Exception as e:
+            print(f"Predict Error: {e}"); return None
 
 # ----------------------------
 # 3. MAIN PI CONTROLLER
@@ -357,6 +335,7 @@ class PiFruitAnalyzer:
         self.lcd2_addr = lcd2_addr
         self.port1 = port1
         self.port2 = port2
+        self.result_buffer = deque(maxlen=5) # Smoothing window
         self.setup_lcd()
         self.setup_camera()
 
@@ -493,30 +472,39 @@ class PiFruitAnalyzer:
                 if not image_path: continue
                 
                 result = self.predictor.predict(image_path)
+                if not result: continue
                 
-                # 2. Filter by manual fruit if selected
-                target_fruit = remote_state["manual_fruit"].lower()
-                if target_fruit != "auto":
-                    if result['fruit'].lower() != target_fruit:
-                        # If triggered manually, maybe show "Wrong fruit"
-                        if remote_state["trigger_scan"]:
-                            self.lcd_print(self.lcd1, "WRONG FRUIT", f"Wanted: {target_fruit}")
-                            remote_state["trigger_scan"] = False
-                            time.sleep(2)
-                        continue
+                # --- TEMPORAL SMOOTHING ---
+                # We store a unique key for the prediction (fruit + stage + is_rotten)
+                pred_key = f"{result['fruit']}_{result['stage']}_{result['is_rotten']}"
+                self.result_buffer.append((pred_key, result))
+                
+                # Wait until we have at least 3 frames for a stable decision
+                if len(self.result_buffer) >= 3:
+                    # Find the most frequent prediction in the window
+                    keys = [item[0] for item in self.result_buffer]
+                    most_common_key = max(set(keys), key=keys.count)
+                    
+                    # If the most common prediction appears at least 3 times, it's stable
+                    if keys.count(most_common_key) >= 3:
+                        # Get the actual result object for this key
+                        final_result = next(item[1] for item in self.result_buffer if item[0] == most_common_key)
+                        
+                        remote_state["trigger_scan"] = False
+                        remote_state["last_result"] = final_result
 
-                # 3. Confidence threshold
-                if result['confidence'] < 0.6 and not remote_state["trigger_scan"]:
-                    self.lcd_print(self.lcd1, "SEARCHING...", "PLACE FRUIT")
-                    time.sleep(0.5)
-                    continue
-
-                remote_state["trigger_scan"] = False
-                remote_state["last_result"] = result
-
-                # 4. Display results
-                self._update_displays(result)
-                time.sleep(3)
+                        # Display results
+                        self._update_displays(final_result)
+                        
+                        # Only sleep if we actually showed a result to avoid freezing the camera
+                        time.sleep(2)
+                    else:
+                        # If not stable, show "Scanning..."
+                        self.lcd_print(self.lcd1, "ANALYZING...", "KEEP STEADY")
+                        time.sleep(0.1)
+                else:
+                    self.lcd_print(self.lcd1, "STABILIZING...", "PLEASE WAIT")
+                    time.sleep(0.1)
                 
         except KeyboardInterrupt: pass
         finally:
