@@ -84,26 +84,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _pickModel() async {
     FilePickerResult? result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['onnx'],
+      type: FileType.any,
     );
     if (result != null) {
-      setState(() {
-        _localModelPath = result.files.single.path;
-        _localModelName = result.files.single.name;
-      });
+      final fileName = result.files.single.name.toLowerCase();
+      if (fileName.endsWith('.onnx')) {
+        setState(() {
+          _localModelPath = result.files.single.path;
+          _localModelName = result.files.single.name;
+        });
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Please select a valid .onnx file"))
+          );
+        }
+      }
     }
   }
 
   Future<void> _pickInfo() async {
     FilePickerResult? result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['json'],
+      type: FileType.any,
     );
     if (result != null) {
-      setState(() {
-        _localInfoPath = result.files.single.path;
-      });
+      final fileName = result.files.single.name.toLowerCase();
+      if (fileName.endsWith('.json')) {
+        setState(() {
+          _localInfoPath = result.files.single.path;
+        });
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Please select a valid .json file"))
+          );
+        }
+      }
     }
   }
 
