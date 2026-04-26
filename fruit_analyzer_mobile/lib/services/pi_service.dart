@@ -68,7 +68,10 @@ class PiService extends ChangeNotifier {
   PiResult? get latestResult => _latestResult;
   Uint8List? get currentFrame => _currentFrame;
   String get ip => _ip;
-  String get baseUrl => 'http://$_ip:5000';
+  String get baseUrl {
+    if (_ip.startsWith('http')) return _ip;
+    return 'http://$_ip:5000';
+  }
 
   Future<void> fetchFrame() async {
     if (!_isConnected) return;

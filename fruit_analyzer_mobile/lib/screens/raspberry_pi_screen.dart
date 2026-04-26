@@ -364,8 +364,14 @@ class _RaspberryPiScreenState extends State<RaspberryPiScreen> {
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text("Pi 5 IP Address"),
-        content: TextField(controller: controller, decoration: const InputDecoration(hintText: "192.168.1.x")),
+        title: const Text("Pi 5 Connection"),
+        content: TextField(
+          controller: controller, 
+          decoration: const InputDecoration(
+            hintText: "e.g. 192.168.1.x or https://xyz.ngrok.io",
+            helperText: "Enter Local IP or Public Tunnel URL",
+          ),
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
           TextButton(
