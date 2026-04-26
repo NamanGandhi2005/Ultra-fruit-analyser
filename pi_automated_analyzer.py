@@ -222,32 +222,88 @@ class FruitPredictor:
             print(f"❌ ML Load Error: {e}")
             self.model = None
 
-    def is_rotten(self, image_path):
-        """Simple CV check for brown/dark spots"""
+    def is_rotten(self, image_path, brown_threshold=0.35, dark_threshold=0.50):
+        """Advanced CV check for brown, dark, and mold spots using HSV and LAB"""
         try:
             img = cv2.imread(image_path)
+            if img is None: return False
+            
+            # Convert to HSV and LAB
             hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+            lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
             h, s, v = cv2.split(hsv)
-            brown_mask = ((h >= 5) & (h <= 35) & (s >= 50) & (v <= 180))
-            brown_ratio = np.sum(brown_mask) / (img.shape[0] * img.shape[1])
+            l, a, b = cv2.split(lab)
+
+            # Brown spots (HSV + LAB for robustness)
+            brown_mask_hsv = ((h >= 5) & (h <= 30) & (s >= 50) & (v <= 150))
+            brown_mask_lab = ((a >= 130) & (a <= 165) & (b >= 130) & (b <= 165))
+            brown_ratio = max(np.sum(brown_mask_hsv), np.sum(brown_mask_lab)) / (img.shape[0] * img.shape[1])
+            
+            # Dark/Bruised spots
             dark_mask = (v < 35)
             dark_ratio = np.sum(dark_mask) / (img.shape[0] * img.shape[1])
-            return bool((brown_ratio >= 0.35) or (dark_ratio >= 0.50))
-        except: return False
+            
+            # Mold detection (Greenish/Greyish spots)
+            mold_mask = ((h >= 70) & (h <= 100) & (s >= 40) & (v >= 40))
+            mold_ratio = np.sum(mold_mask) / (img.shape[0] * img.shape[1])
+
+            is_rotten = bool((brown_ratio >= brown_threshold) or (dark_ratio >= dark_threshold) or (mold_ratio >= 0.05))
+            print(f"👁️ CV Debug -> Brown: {brown_ratio:.2f}, Dark: {dark_ratio:.2f}, Mold: {mold_ratio:.2f}")
+            return is_rotten
+        except Exception as e:
+            print(f"CV Error: {e}")
+            return False
 
     def predict(self, image_path):
+        """Inference with TTA (Test-Time Augmentation) and ROI Focus"""
+        # 1. Standard Transforms
         transform = transforms.Compose([
             transforms.Resize((224, 224)),
             transforms.ToTensor(),
             transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
         ])
+        
+        # 2. Flipped Transform for TTA
+        flip_transform = transforms.Compose([
+            transforms.Resize((224, 224)),
+            transforms.RandomHorizontalFlip(p=1.0),
+            transforms.ToTensor(),
+            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        ])
+
         raw_image = Image.open(image_path).convert('RGB')
-        img_tensor = transform(raw_image).unsqueeze(0).to(self.device)
+        
+        # Crop center square to focus on fruit (ROI)
+        w, h = raw_image.size
+        crop_size = min(w, h, 400)
+        left = (w - crop_size)/2
+        top = (h - crop_size)/2
+        right = (w + crop_size)/2
+        bottom = (h + crop_size)/2
+        roi_image = raw_image.crop((left, top, right, bottom))
+
+        # Create batch: [Original ROI, Flipped ROI]
+        img_tensors = torch.stack([
+            transform(roi_image),
+            flip_transform(roi_image)
+        ]).to(self.device)
 
         with torch.no_grad():
-            outputs = self.model(img_tensor)
+            outputs = self.model(img_tensors)
             probs = torch.nn.functional.softmax(outputs, dim=1)
-            conf, idx = torch.max(probs, 1)
+            
+            # TTA: Average probabilities
+            avg_probs = torch.mean(probs, dim=0)
+            
+            # Filtering by manual fruit if selected
+            target_fruit = remote_state["manual_fruit"].lower()
+            if target_fruit != "auto":
+                mask = torch.tensor([1.0 if target_fruit in c.lower() else 0.0 for c in self.class_names], device=self.device)
+                if mask.sum() > 0:
+                    avg_probs = avg_probs * mask
+                    if avg_probs.sum() > 0: avg_probs = avg_probs / avg_probs.sum()
+
+            conf, idx = torch.max(avg_probs, 0)
             
         label = self.class_names[idx.item()]
         parts = label.split('_stage_')
@@ -259,6 +315,26 @@ class FruitPredictor:
         stage_info = fruit_db.get(str(stage), {})
         rotten_db = stage_info.get('rotten', False)
         
+        # Smart Correction: If AI says rotten but CV says fresh, check confidence
+        if rotten_db and not rotten_cv and conf < 0.90:
+            # Look for highest fresh stage of same fruit
+            fresh_idx = -1
+            max_fresh_prob = -1
+            for i, name in enumerate(self.class_names):
+                if name.startswith(fruit):
+                    s_id = name.split('_stage_')[1] if '_stage_' in name else "1"
+                    if not fruit_db.get(s_id, {}).get('rotten', False):
+                        if avg_probs[i] > max_fresh_prob:
+                            max_fresh_prob = avg_probs[i]
+                            fresh_idx = i
+            
+            if fresh_idx != -1 and max_fresh_prob > (conf * 0.6):
+                print(f"✨ Smart Correction: Switched to fresh stage {self.class_names[fresh_idx]} ({max_fresh_prob:.1%})")
+                label = self.class_names[fresh_idx]
+                stage = label.split('_stage_')[1] if '_stage_' in label else "1"
+                conf = max_fresh_prob
+                rotten_db = False
+
         is_rotten = bool(rotten_db or rotten_cv)
 
         return {
@@ -358,23 +434,63 @@ class PiFruitAnalyzer:
             return path
         return None
 
+    def is_object_present(self, frame):
+        """Simple check to see if an object is present in the center ROI"""
+        try:
+            h, w, _ = frame.shape
+            crop_size = min(w, h, 400)
+            y1, y2 = (h - crop_size)//2, (h + crop_size)//2
+            x1, x2 = (w - crop_size)//2, (w + crop_size)//2
+            roi = frame[y1:y2, x1:x2]
+            
+            # Convert to HSV and check for saturation/brightness variety
+            hsv_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+            s_mean = np.mean(hsv_roi[:,:,1])
+            v_mean = np.mean(hsv_roi[:,:,2])
+            
+            # If saturation is very low, it's likely a plain background
+            # If brightness is very low, it's likely dark
+            if s_mean < 30 or v_mean < 40:
+                return False
+                
+            # Use edge detection to check for "interesting" features
+            gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+            edges = cv2.Canny(gray, 50, 150)
+            edge_density = np.sum(edges) / (crop_size * crop_size)
+            
+            return edge_density > 2.0 # Threshold for "something is there"
+        except: return True
+
     def run(self):
         threading.Thread(target=run_flask, daemon=True).start()
         self.lcd_print(self.lcd1, "READY TO SCAN", "PLACE FRUIT")
+        
+        last_presence = False
         
         try:
             while True:
                 # 1. Check if automation is enabled or scan triggered
                 if not remote_state["automated_enabled"] and not remote_state["trigger_scan"]:
-                    # Still update displays if in custom mode
                     self._update_displays(None)
                     time.sleep(0.5)
                     continue
 
-                image_path = self.capture_image()
-                if not image_path:
+                if self.frame_buffer is None:
                     time.sleep(0.1)
                     continue
+
+                # 2. Presence Check (Avoid analyzing empty background)
+                is_present = self.is_object_present(self.frame_buffer)
+                if not is_present and not remote_state["trigger_scan"]:
+                    if last_presence:
+                        self.lcd_print(self.lcd1, "READY TO SCAN", "PLACE FRUIT")
+                    last_presence = False
+                    time.sleep(0.5)
+                    continue
+                
+                last_presence = True
+                image_path = self.capture_image()
+                if not image_path: continue
                 
                 result = self.predictor.predict(image_path)
                 
