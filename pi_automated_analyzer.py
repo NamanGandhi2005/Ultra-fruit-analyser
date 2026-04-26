@@ -3,9 +3,7 @@ import json
 import time
 import cv2
 import numpy as np
-import torch
-import torch.nn as nn
-from torchvision import models, transforms
+import onnxruntime as ort
 from PIL import Image
 from datetime import datetime
 import requests
@@ -37,40 +35,42 @@ remote_state = {
 @app.route('/upload_model', methods=['POST'])
 def upload_model():
     if 'model' not in request.files:
-        return jsonify({"status": "error", "message": "No model file provided"}), 400
+        return jsonify({"status": "error", "message": "No model (.onnx) file provided"}), 400
     
-    file = request.files['model']
-    if not file.filename.endswith('.pth'):
-        return jsonify({"status": "error", "message": "Only .pth files allowed"}), 400
+    model_file = request.files['model']
+    info_file = request.files.get('info') # Optional info.json
+    
+    if not model_file.filename.endswith('.onnx'):
+        return jsonify({"status": "error", "message": "Only .onnx files allowed"}), 400
 
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    temp_path = os.path.join(base_dir, "uploaded_model.pth")
-    file.save(temp_path)
+    model_path = os.path.join(base_dir, "fruit_model.onnx")
+    info_path = os.path.join(base_dir, "model_info.json")
     
     try:
-        import importlib
-        import export_to_onnx
-        importlib.reload(export_to_onnx)
-        from export_to_onnx import export_model
+        model_file.save(model_path)
+        if info_file:
+            info_file.save(info_path)
         
-        onnx_path = os.path.join(base_dir, "converted_model.onnx")
-        info_path = os.path.join(base_dir, "converted_model_info.json")
-        export_model(temp_path, onnx_path, info_path)
+        # Reload the predictor if it exists
+        global analyzer
+        if 'analyzer' in globals() and analyzer:
+            analyzer.predictor.load_model(model_path, info_path)
         
-        print(f"✅ Conversion complete: {onnx_path}")
+        print(f"✅ Model replaced: {model_file.filename}")
         return jsonify({
             "status": "success", 
-            "message": "Model converted successfully",
-            "model_name": file.filename
+            "message": "Model and Info updated successfully",
+            "model_name": model_file.filename
         })
     except Exception as e:
-        print(f"❌ Conversion failed: {e}")
+        print(f"❌ Upload failed: {e}")
         return jsonify({"status": "error", "message": str(e)}), 500
 
 @app.route('/download_onnx')
 def download_onnx():
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    path = os.path.join(base_dir, "converted_model.onnx")
+    path = os.path.join(base_dir, "fruit_model.onnx")
     if os.path.exists(path):
         return send_file(path, as_attachment=True)
     return "Not found", 404
@@ -78,7 +78,7 @@ def download_onnx():
 @app.route('/download_info')
 def download_info():
     base_dir = os.path.dirname(os.path.abspath(__file__))
-    path = os.path.join(base_dir, "converted_model_info.json")
+    path = os.path.join(base_dir, "model_info.json")
     if os.path.exists(path):
         return send_file(path, as_attachment=True)
     return "Not found", 404
@@ -195,32 +195,35 @@ class NotificationManager:
 # 2. MACHINE LEARNING LOGIC
 # ----------------------------
 class FruitPredictor:
-    def __init__(self, model_path='fruit_efficientnet_b0.pth'):
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        print(f"🧠 ML Engine: Using {self.device}")
-        
+    def __init__(self, model_path='fruit_model.onnx', info_path='model_info.json'):
         # Load Nutrient Database
         try:
             with open('nutrients.json', 'r') as f:
                 self.NUTRIENT_DB = json.load(f)
         except: self.NUTRIENT_DB = {}
+        
+        self.session = None
+        self.class_names = []
+        self.load_model(model_path, info_path)
 
-        # Load Model
+    def load_model(self, model_path, info_path):
+        """Load ONNX model and info JSON"""
         try:
-            checkpoint = torch.load(model_path, map_location=self.device)
-            self.class_names = checkpoint['class_names']
-            num_classes = len(self.class_names)
+            if not os.path.exists(model_path):
+                print(f"⚠️ Model file {model_path} not found.")
+                return
+
+            self.session = ort.InferenceSession(model_path)
+            self.input_name = self.session.get_inputs()[0].name
             
-            # Recreate EfficientNet B0 architecture
-            self.model = models.efficientnet_b0(weights=None)
-            self.model.classifier[1] = nn.Linear(self.model.classifier[1].in_features, num_classes)
-            self.model.load_state_dict(checkpoint['model_state_dict'])
-            self.model.to(self.device)
-            self.model.eval()
-            print(f"✅ Model loaded: {model_path} ({num_classes} classes)")
+            if os.path.exists(info_path):
+                with open(info_path, 'r') as f:
+                    info = json.load(f)
+                    self.class_names = info.get('class_names', [])
+            
+            print(f"✅ ONNX Model loaded: {model_path} ({len(self.class_names)} classes)")
         except Exception as e:
             print(f"❌ ML Load Error: {e}")
-            self.model = None
 
     def is_rotten(self, image_path, brown_threshold=0.35, dark_threshold=0.50):
         """Advanced CV check for brown, dark, and mold spots using HSV and LAB"""
@@ -254,97 +257,90 @@ class FruitPredictor:
             print(f"CV Error: {e}")
             return False
 
+    def _preprocess(self, pil_img):
+        """Preprocess image for ONNX ResNet/EfficientNet"""
+        img = pil_img.resize((224, 224))
+        img_data = np.array(img).transpose(2, 0, 1).astype(np.float32)
+        img_data /= 255.0
+        # Normalize
+        mean = np.array([0.485, 0.456, 0.406]).reshape(3, 1, 1)
+        std = np.array([0.229, 0.224, 0.225]).reshape(3, 1, 1)
+        img_data = (img_data - mean) / std
+        return img_data
+
     def predict(self, image_path):
-        """Inference with TTA (Test-Time Augmentation) and ROI Focus"""
-        # 1. Standard Transforms
-        transform = transforms.Compose([
-            transforms.Resize((224, 224)),
-            transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-        ])
-        
-        # 2. Flipped Transform for TTA
-        flip_transform = transforms.Compose([
-            transforms.Resize((224, 224)),
-            transforms.RandomHorizontalFlip(p=1.0),
-            transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
-        ])
+        """Inference with ONNX and ROI Focus"""
+        if self.session is None:
+            return None
 
-        raw_image = Image.open(image_path).convert('RGB')
-        
-        # Crop center square to focus on fruit (ROI)
-        w, h = raw_image.size
-        crop_size = min(w, h, 400)
-        left = (w - crop_size)/2
-        top = (h - crop_size)/2
-        right = (w + crop_size)/2
-        bottom = (h + crop_size)/2
-        roi_image = raw_image.crop((left, top, right, bottom))
+        try:
+            raw_image = Image.open(image_path).convert('RGB')
+            w, h = raw_image.size
+            crop_size = min(w, h, 400)
+            roi_image = raw_image.crop(((w-crop_size)//2, (h-crop_size)//2, (w+crop_size)//2, (h+crop_size)//2))
 
-        # Create batch: [Original ROI, Flipped ROI]
-        img_tensors = torch.stack([
-            transform(roi_image),
-            flip_transform(roi_image)
-        ]).to(self.device)
-
-        with torch.no_grad():
-            outputs = self.model(img_tensors)
-            probs = torch.nn.functional.softmax(outputs, dim=1)
+            # 2-way TTA (Original + Horizontal Flip)
+            img_org = self._preprocess(roi_image)
+            img_flip = self._preprocess(roi_image.transpose(Image.FLIP_LEFT_RIGHT))
             
-            # TTA: Average probabilities
-            avg_probs = torch.mean(probs, dim=0)
+            # Combine into a batch
+            input_batch = np.stack([img_org, img_flip]).astype(np.float32)
+
+            # Run ONNX inference
+            outputs = self.session.run(None, {self.input_name: input_batch})
+            probs = np.exp(outputs[0]) / np.sum(np.exp(outputs[0]), axis=1, keepdims=True)
+            avg_probs = np.mean(probs, axis=0)
             
             # Filtering by manual fruit if selected
             target_fruit = remote_state["manual_fruit"].lower()
             if target_fruit != "auto":
-                mask = torch.tensor([1.0 if target_fruit in c.lower() else 0.0 for c in self.class_names], device=self.device)
-                if mask.sum() > 0:
+                mask = np.array([1.0 if target_fruit in c.lower() else 0.0 for c in self.class_names])
+                if np.sum(mask) > 0:
                     avg_probs = avg_probs * mask
-                    if avg_probs.sum() > 0: avg_probs = avg_probs / avg_probs.sum()
+                    if np.sum(avg_probs) > 0: avg_probs /= np.sum(avg_probs)
 
-            conf, idx = torch.max(avg_probs, 0)
+            idx = np.argmax(avg_probs)
+            conf = avg_probs[idx]
             
-        label = self.class_names[idx.item()]
-        parts = label.split('_stage_')
-        fruit = parts[0] if len(parts) == 2 else label.split('_')[0]
-        stage = parts[1] if len(parts) == 2 else "1"
+            label = self.class_names[idx]
+            parts = label.split('_stage_')
+            fruit = parts[0] if len(parts) == 2 else label.split('_')[0]
+            stage = parts[1] if len(parts) == 2 else "1"
 
-        rotten_cv = self.is_rotten(image_path)
-        fruit_db = self.NUTRIENT_DB.get(fruit.lower(), {})
-        stage_info = fruit_db.get(str(stage), {})
-        rotten_db = stage_info.get('rotten', False)
-        
-        # Smart Correction: If AI says rotten but CV says fresh, check confidence
-        if rotten_db and not rotten_cv and conf < 0.90:
-            # Look for highest fresh stage of same fruit
-            fresh_idx = -1
-            max_fresh_prob = -1
-            for i, name in enumerate(self.class_names):
-                if name.startswith(fruit):
-                    s_id = name.split('_stage_')[1] if '_stage_' in name else "1"
-                    if not fruit_db.get(s_id, {}).get('rotten', False):
-                        if avg_probs[i] > max_fresh_prob:
-                            max_fresh_prob = avg_probs[i]
-                            fresh_idx = i
+            rotten_cv = self.is_rotten(image_path)
+            fruit_db = self.NUTRIENT_DB.get(fruit.lower(), {})
+            stage_info = fruit_db.get(str(stage), {})
+            rotten_db = stage_info.get('rotten', False)
             
-            if fresh_idx != -1 and max_fresh_prob > (conf * 0.6):
-                print(f"✨ Smart Correction: Switched to fresh stage {self.class_names[fresh_idx]} ({max_fresh_prob:.1%})")
-                label = self.class_names[fresh_idx]
-                stage = label.split('_stage_')[1] if '_stage_' in label else "1"
-                conf = max_fresh_prob
-                rotten_db = False
+            # Smart Correction
+            if rotten_db and not rotten_cv and conf < 0.90:
+                fresh_idx, max_fresh_prob = -1, -1
+                for i, name in enumerate(self.class_names):
+                    if name.startswith(fruit):
+                        s_id = name.split('_stage_')[1] if '_stage_' in name else "1"
+                        if not fruit_db.get(s_id, {}).get('rotten', False):
+                            if avg_probs[i] > max_fresh_prob:
+                                max_fresh_prob = avg_probs[i]; fresh_idx = i
+                
+                if fresh_idx != -1 and max_fresh_prob > (conf * 0.6):
+                    label = self.class_names[fresh_idx]
+                    stage = label.split('_stage_')[1] if '_stage_' in label else "1"
+                    conf = max_fresh_prob
+                    rotten_db = False
 
-        is_rotten = bool(rotten_db or rotten_cv)
+            is_rotten = bool(rotten_db or rotten_cv)
 
-        return {
-            'fruit': str(fruit.capitalize()),
-            'stage': str(stage),
-            'name': str(stage_info.get('name', 'Unidentified')),
-            'confidence': float(conf.item()),
-            'is_rotten': is_rotten,
-            'nutrients': stage_info if not is_rotten else None
-        }
+            return {
+                'fruit': str(fruit.capitalize()),
+                'stage': str(stage),
+                'name': str(stage_info.get('name', 'Unidentified')),
+                'confidence': float(conf),
+                'is_rotten': is_rotten,
+                'nutrients': stage_info if not is_rotten else None
+            }
+        except Exception as e:
+            print(f"Predict Error: {e}")
+            return None
 
 # ----------------------------
 # 3. MAIN PI CONTROLLER
