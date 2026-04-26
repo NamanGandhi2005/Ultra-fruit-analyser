@@ -81,57 +81,56 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final piService = Provider.of<PiService>(context, listen: false);
     final predictionService = Provider.of<PredictionService>(context, listen: false);
     
-    // Explicitly ask for all files or handle the extension check
-    FilePickerResult? result = await FilePicker.platform.pickFiles(
-      type: FileType.any, 
+    // Pick the ONNX file
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Select the .onnx model file")));
+    FilePickerResult? modelResult = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['onnx'],
     );
 
-    if (result != null) {
-      final fileName = result.files.single.name;
-      if (!fileName.endsWith('.pth')) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Please select a .pth file")));
-        return;
-      }
+    if (modelResult != null) {
+      // Pick the info.json file
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Select the model_info.json file")));
+      FilePickerResult? infoResult = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['json'],
+      );
 
-      setState(() => _isUploading = true);
-      try {
-        final filePath = result.files.single.path!;
-        final formData = dio.FormData.fromMap({
-          'model': await dio.MultipartFile.fromFile(filePath, filename: fileName),
-        });
+      if (infoResult != null) {
+        setState(() => _isUploading = true);
+        try {
+          final modelPath = modelResult.files.single.path!;
+          final infoPath = infoResult.files.single.path!;
+          final modelName = modelResult.files.single.name;
 
-        // Use a longer timeout for conversion
-        final uploadDio = dio.Dio(dio.BaseOptions(
-          connectTimeout: const Duration(seconds: 10),
-          sendTimeout: const Duration(seconds: 60),
-          receiveTimeout: const Duration(seconds: 60),
-        ));
-        
-        final response = await uploadDio.post(
-          '${piService.baseUrl}/upload_model',
-          data: formData,
-        );
+          // 1. Update Mobile Inference
+          final modelBytes = await File(modelPath).readAsBytes();
+          final infoJson = json.decode(await File(infoPath).readAsString());
+          await predictionService.updateModel(modelBytes, infoJson, modelName);
 
-        if (response.data['status'] == 'success') {
-          final onnxRes = await uploadDio.get('${piService.baseUrl}/download_onnx', options: dio.Options(responseType: dio.ResponseType.bytes));
-          final infoRes = await uploadDio.get('${piService.baseUrl}/download_info', options: dio.Options(responseType: dio.ResponseType.json));
+          // 2. Upload to Pi if connected
+          if (piService.isConnected) {
+            final formData = dio.FormData.fromMap({
+              'model': await dio.MultipartFile.fromFile(modelPath, filename: modelName),
+              'info': await dio.MultipartFile.fromFile(infoPath, filename: 'model_info.json'),
+            });
 
-          await predictionService.updateModel(
-            Uint8List.fromList(onnxRes.data),
-            infoRes.data as Map<String, dynamic>,
-            fileName,
-          );
+            await dio.Dio().post(
+              '${piService.baseUrl}/upload_model',
+              data: formData,
+            );
+          }
 
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Model updated and converted successfully!")));
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Model updated on Mobile & Pi successfully!")));
           }
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Model update failed: $e")));
+          }
+        } finally {
+          if (mounted) setState(() => _isUploading = false);
         }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Model update failed: $e")));
-        }
-      } finally {
-        if (mounted) setState(() => _isUploading = false);
       }
     }
   }
@@ -186,12 +185,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     TextButton.icon(
                       onPressed: _pickAndUploadModel,
                       icon: const Icon(Icons.upload_file),
-                      label: const Text("UPLOAD .PTH"),
+                      label: const Text("UPLOAD ONNX"),
                     ),
                 ],
               ),
               const SizedBox(height: 10),
-              const Text("Upload a PyTorch (.pth) model to the Pi for auto-conversion to ONNX.", 
+              const Text("Select an .onnx model and model_info.json to update local and Pi inference.", 
                 style: TextStyle(fontSize: 10, color: Colors.white54)),
               const Divider(height: 24),
               SizedBox(
