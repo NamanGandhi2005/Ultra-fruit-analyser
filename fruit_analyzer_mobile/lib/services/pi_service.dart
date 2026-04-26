@@ -11,6 +11,9 @@ class PiResult {
   final Map<String, dynamic> nutrients;
   final String focusMode;
   final double lensPos;
+  final bool automatedEnabled;
+  final String display1Mode;
+  final String display2Mode;
   final DateTime timestamp;
 
   PiResult({
@@ -20,6 +23,9 @@ class PiResult {
     required this.nutrients,
     required this.focusMode,
     required this.lensPos,
+    required this.automatedEnabled,
+    required this.display1Mode,
+    required this.display2Mode,
     required this.timestamp,
   });
 
@@ -32,6 +38,9 @@ class PiResult {
       nutrients: Map<String, dynamic>.from(lastResult?['nutrients'] ?? {}),
       focusMode: json['focus_mode'] ?? 'auto',
       lensPos: (json['lens_pos'] ?? 0.0).toDouble(),
+      automatedEnabled: json['automated_enabled'] ?? true,
+      display1Mode: json['display1_mode'] ?? 'result',
+      display2Mode: json['display2_mode'] ?? 'result',
       timestamp: DateTime.now(),
     );
   }
@@ -135,6 +144,25 @@ class PiService extends ChangeNotifier {
       await _dio.post('$baseUrl/set_focus', data: data);
     } catch (e) {
       print("Error setting focus: $e");
+    }
+  }
+
+  Future<void> setAutomation(bool enabled) async {
+    try {
+      await _dio.post('$baseUrl/set_automation', data: {'enabled': enabled});
+    } catch (e) {
+      print("Error setting automation: $e");
+    }
+  }
+
+  Future<void> setDisplay(int lcd, String mode, {String? l1, String? l2}) async {
+    try {
+      final Map<String, dynamic> data = {'lcd': lcd, 'mode': mode};
+      if (l1 != null) data['l1'] = l1;
+      if (l2 != null) data['l2'] = l2;
+      await _dio.post('$baseUrl/set_display', data: data);
+    } catch (e) {
+      print("Error setting display: $e");
     }
   }
 

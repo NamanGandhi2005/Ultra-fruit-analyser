@@ -136,6 +136,20 @@ class _RaspberryPiScreenState extends State<RaspberryPiScreen> {
                       _buildStatusCard(piService.latestResult!, theme),
                     
                     const SizedBox(height: 20),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text("Automated Analysis", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.blueAccent)),
+                        Switch(
+                          value: piService.latestResult?.automatedEnabled ?? true,
+                          onChanged: (val) {
+                            piService.setAutomation(val);
+                          },
+                        ),
+                      ],
+                    ),
+
+                    const SizedBox(height: 20),
                     const Text("Lens Control", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
                     Row(
                       children: [
@@ -178,6 +192,65 @@ class _RaspberryPiScreenState extends State<RaspberryPiScreen> {
                           },
                         );
                       }).toList(),
+                    ),
+
+                    const SizedBox(height: 20),
+                    const Text("Display Controls", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text("Display 1", style: TextStyle(fontSize: 12, color: Colors.grey)),
+                              DropdownButton<String>(
+                                isExpanded: true,
+                                value: piService.latestResult?.display1Mode ?? 'result',
+                                items: ['result', 'status', 'custom'].map((String value) {
+                                  return DropdownMenuItem<String>(
+                                    value: value,
+                                    child: Text(value.toUpperCase(), style: const TextStyle(fontSize: 12)),
+                                  );
+                                }).toList(),
+                                onChanged: (val) {
+                                  if (val == "custom") {
+                                    _showCustomTextDialog(context, piService, 1);
+                                  } else if (val != null) {
+                                    piService.setDisplay(1, val);
+                                  }
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 20),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text("Display 2", style: TextStyle(fontSize: 12, color: Colors.grey)),
+                              DropdownButton<String>(
+                                isExpanded: true,
+                                value: piService.latestResult?.display2Mode ?? 'result',
+                                items: ['result', 'status', 'custom'].map((String value) {
+                                  return DropdownMenuItem<String>(
+                                    value: value,
+                                    child: Text(value.toUpperCase(), style: const TextStyle(fontSize: 12)),
+                                  );
+                                }).toList(),
+                                onChanged: (val) {
+                                  if (val == "custom") {
+                                    _showCustomTextDialog(context, piService, 2);
+                                  } else if (val != null) {
+                                    piService.setDisplay(2, val);
+                                  }
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
                     ),
 
                     const SizedBox(height: 30),
@@ -255,6 +328,34 @@ class _RaspberryPiScreenState extends State<RaspberryPiScreen> {
         const SizedBox(height: 4),
         Text(value, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
       ],
+    );
+  }
+
+  void _showCustomTextDialog(BuildContext context, PiService piService, int lcd) {
+    final l1Controller = TextEditingController();
+    final l2Controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text("Custom Text - Display $lcd"),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(controller: l1Controller, decoration: const InputDecoration(hintText: "Line 1 (max 16 chars)"), maxLength: 16),
+            TextField(controller: l2Controller, decoration: const InputDecoration(hintText: "Line 2 (max 16 chars)"), maxLength: 16),
+          ],
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Cancel")),
+          TextButton(
+            onPressed: () {
+              piService.setDisplay(lcd, "custom", l1: l1Controller.text, l2: l2Controller.text);
+              Navigator.pop(context);
+            },
+            child: const Text("Set Text"),
+          ),
+        ],
+      ),
     );
   }
 

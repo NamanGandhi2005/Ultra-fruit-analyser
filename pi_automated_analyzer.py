@@ -24,7 +24,14 @@ remote_state = {
     "trigger_scan": False,
     "last_result": None,
     "focus_mode": "auto", # auto or manual
-    "lens_pos": 0.0
+    "lens_pos": 0.0,
+    "automated_enabled": True,
+    "display1_mode": "result", # result, status, custom
+    "display2_mode": "result", # result, status, custom
+    "custom_text1_l1": "",
+    "custom_text1_l2": "",
+    "custom_text2_l1": "",
+    "custom_text2_l2": ""
 }
 
 @app.route('/upload_model', methods=['POST'])
@@ -115,13 +122,42 @@ def trigger_scan():
     remote_state["trigger_scan"] = True
     return jsonify({"status": "success", "message": "Scan triggered"})
 
+@app.route('/set_automation', methods=['POST'])
+def set_automation():
+    data = request.json
+    remote_state["automated_enabled"] = data.get('enabled', True)
+    print(f"📡 Remote command: Automation set to {remote_state['automated_enabled']}")
+    return jsonify({"status": "success", "enabled": remote_state["automated_enabled"]})
+
+@app.route('/set_display', methods=['POST'])
+def set_display():
+    data = request.json
+    lcd_num = data.get('lcd', 1)
+    mode = data.get('mode', 'result')
+    
+    if lcd_num == 1:
+        remote_state["display1_mode"] = mode
+        if mode == "custom":
+            remote_state["custom_text1_l1"] = data.get('l1', "")
+            remote_state["custom_text1_l2"] = data.get('l2', "")
+    else:
+        remote_state["display2_mode"] = mode
+        if mode == "custom":
+            remote_state["custom_text2_l1"] = data.get('l1', "")
+            remote_state["custom_text2_l2"] = data.get('l2', "")
+            
+    return jsonify({"status": "success", "lcd": lcd_num, "mode": mode})
+
 @app.route('/status')
 def get_status():
     return jsonify({
         "manual_fruit": str(remote_state["manual_fruit"]),
         "last_result": remote_state["last_result"],
         "focus_mode": remote_state["focus_mode"],
-        "lens_pos": remote_state["lens_pos"]
+        "lens_pos": remote_state["lens_pos"],
+        "automated_enabled": remote_state["automated_enabled"],
+        "display1_mode": remote_state["display1_mode"],
+        "display2_mode": remote_state["display2_mode"]
     })
 
 def run_flask():
@@ -328,6 +364,13 @@ class PiFruitAnalyzer:
         
         try:
             while True:
+                # 1. Check if automation is enabled or scan triggered
+                if not remote_state["automated_enabled"] and not remote_state["trigger_scan"]:
+                    # Still update displays if in custom mode
+                    self._update_displays(None)
+                    time.sleep(0.5)
+                    continue
+
                 image_path = self.capture_image()
                 if not image_path:
                     time.sleep(0.1)
@@ -335,30 +378,73 @@ class PiFruitAnalyzer:
                 
                 result = self.predictor.predict(image_path)
                 
+                # 2. Filter by manual fruit if selected
+                target_fruit = remote_state["manual_fruit"].lower()
+                if target_fruit != "auto":
+                    if result['fruit'].lower() != target_fruit:
+                        # If triggered manually, maybe show "Wrong fruit"
+                        if remote_state["trigger_scan"]:
+                            self.lcd_print(self.lcd1, "WRONG FRUIT", f"Wanted: {target_fruit}")
+                            remote_state["trigger_scan"] = False
+                            time.sleep(2)
+                        continue
+
+                # 3. Confidence threshold
                 if result['confidence'] < 0.6 and not remote_state["trigger_scan"]:
                     self.lcd_print(self.lcd1, "SEARCHING...", "PLACE FRUIT")
-                    time.sleep(1)
+                    time.sleep(0.5)
                     continue
 
                 remote_state["trigger_scan"] = False
                 remote_state["last_result"] = result
 
-                if result['is_rotten']:
-                    self.lcd_print(self.lcd1, f"{result['fruit']}: ROTTEN", f"Conf: {result['confidence']:.1%}")
-                    self.lcd_print(self.lcd2, "!!! ROTTEN !!!", "DO NOT CONSUME")
-                else:
-                    self.lcd_print(self.lcd1, f"{result['fruit']}", f"{result['name']} ({result['confidence']:.0%})")
-                    n = result['nutrients']
-                    if n:
-                        l1 = f"Sug:{n.get('sugar_g','?')}g VitC:{n.get('vitamin_c_mg','?')}m"
-                        l2 = f"Cal:{n.get('calories','?')} Fib:{n.get('fiber_g','?')}g"
-                        self.lcd_print(self.lcd2, l1, l2)
-
+                # 4. Display results
+                self._update_displays(result)
                 time.sleep(3)
+                
         except KeyboardInterrupt: pass
         finally:
             if HAS_PICAMERA and hasattr(self.camera, 'stop'): self.camera.stop()
             if self.lcd1: self.lcd1.clear()
+            if self.lcd2: self.lcd2.clear()
+
+    def _update_displays(self, result):
+        # Display 1
+        mode1 = remote_state["display1_mode"]
+        if mode1 == "custom":
+            self.lcd_print(self.lcd1, remote_state["custom_text1_l1"], remote_state["custom_text1_l2"])
+        elif mode1 == "status":
+            status = "AUTO" if remote_state["automated_enabled"] else "MANUAL"
+            fruit = remote_state["manual_fruit"].upper()
+            self.lcd_print(self.lcd1, f"MODE: {status}", f"TARGET: {fruit}")
+        elif mode1 == "result" and result:
+            if result['is_rotten']:
+                self.lcd_print(self.lcd1, f"{result['fruit']}: ROTTEN", f"Conf: {result['confidence']:.1%}")
+            else:
+                self.lcd_print(self.lcd1, f"{result['fruit']}", f"{result['name']} ({result['confidence']:.0%})")
+        elif not result:
+            self.lcd_print(self.lcd1, "READY TO SCAN", "PLACE FRUIT")
+
+        # Display 2
+        mode2 = remote_state["display2_mode"]
+        if mode2 == "custom":
+            self.lcd_print(self.lcd2, remote_state["custom_text2_l1"], remote_state["custom_text2_l2"])
+        elif mode2 == "status":
+            ip = "PI 5 ANALYZER"
+            self.lcd_print(self.lcd2, ip, datetime.now().strftime("%H:%M:%S"))
+        elif mode2 == "result" and result:
+            if result['is_rotten']:
+                self.lcd_print(self.lcd2, "!!! ROTTEN !!!", "DO NOT CONSUME")
+            else:
+                n = result['nutrients']
+                if n:
+                    l1 = f"Sug:{n.get('sugar_g','?')}g VitC:{n.get('vitamin_c_mg','?')}m"
+                    l2 = f"Cal:{n.get('calories','?')} Fib:{n.get('fiber_g','?')}g"
+                    self.lcd_print(self.lcd2, l1, l2)
+                else:
+                    self.lcd_print(self.lcd2, "NO NUTRIENT", "DATA FOUND")
+        elif not result:
+            self.lcd_print(self.lcd2, "NUTRIENT INFO", "SYSTEM READY")
 
 if __name__ == "__main__":
     analyzer = PiFruitAnalyzer(lcd1_addr=0x27, lcd2_addr=0x22)
