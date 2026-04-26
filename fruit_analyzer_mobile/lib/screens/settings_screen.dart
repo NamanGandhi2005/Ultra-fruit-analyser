@@ -32,6 +32,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _piIp = TextEditingController();
   bool _isUploading = false;
 
+  String? _localModelPath;
+  String? _localModelName;
+  String? _localInfoPath;
+
   @override
   void initState() {
     super.initState();
@@ -78,61 +82,76 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
-  Future<void> _pickAndUploadModel() async {
-    final piService = Provider.of<PiService>(context, listen: false);
-    final predictionService = Provider.of<PredictionService>(context, listen: false);
-    
-    // Pick the ONNX file
-    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Select the .onnx model file")));
-    FilePickerResult? modelResult = await FilePicker.platform.pickFiles(
+  Future<void> _pickModel() async {
+    FilePickerResult? result = await FilePicker.platform.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['onnx'],
     );
+    if (result != null) {
+      setState(() {
+        _localModelPath = result.files.single.path;
+        _localModelName = result.files.single.name;
+      });
+    }
+  }
 
-    if (modelResult != null) {
-      // Pick the info.json file
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Select the model_info.json file")));
-      FilePickerResult? infoResult = await FilePicker.platform.pickFiles(
-        type: FileType.custom,
-        allowedExtensions: ['json'],
+  Future<void> _pickInfo() async {
+    FilePickerResult? result = await FilePicker.platform.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: ['json'],
+    );
+    if (result != null) {
+      setState(() {
+        _localInfoPath = result.files.single.path;
+      });
+    }
+  }
+
+  Future<void> _applyModelUpdate() async {
+    if (_localModelPath == null || _localInfoPath == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please select both .onnx and .json files"))
       );
+      return;
+    }
 
-      if (infoResult != null) {
-        setState(() => _isUploading = true);
-        try {
-          final modelPath = modelResult.files.single.path!;
-          final infoPath = infoResult.files.single.path!;
-          final modelName = modelResult.files.single.name;
+    final piService = Provider.of<PiService>(context, listen: false);
+    final predictionService = Provider.of<PredictionService>(context, listen: false);
 
-          // 1. Update Mobile Inference
-          final modelBytes = await File(modelPath).readAsBytes();
-          final infoJson = json.decode(await File(infoPath).readAsString());
-          await predictionService.updateModel(modelBytes, infoJson, modelName);
+    setState(() => _isUploading = true);
+    try {
+      // 1. Update Mobile Inference
+      final modelBytes = await File(_localModelPath!).readAsBytes();
+      final infoJson = json.decode(await File(_localInfoPath!).readAsString());
+      await predictionService.updateModel(modelBytes, infoJson, _localModelName!);
 
-          // 2. Upload to Pi if connected
-          if (piService.isConnected) {
-            final formData = dio.FormData.fromMap({
-              'model': await dio.MultipartFile.fromFile(modelPath, filename: modelName),
-              'info': await dio.MultipartFile.fromFile(infoPath, filename: 'model_info.json'),
-            });
+      // 2. Upload to Pi if connected
+      if (piService.isConnected) {
+        final formData = dio.FormData.fromMap({
+          'model': await dio.MultipartFile.fromFile(_localModelPath!, filename: _localModelName),
+          'info': await dio.MultipartFile.fromFile(_localInfoPath!, filename: 'model_info.json'),
+        });
 
-            await dio.Dio().post(
-              '${piService.baseUrl}/upload_model',
-              data: formData,
-            );
-          }
-
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Model updated on Mobile & Pi successfully!")));
-          }
-        } catch (e) {
-          if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Model update failed: $e")));
-          }
-        } finally {
-          if (mounted) setState(() => _isUploading = false);
-        }
+        await dio.Dio().post(
+          '${piService.baseUrl}/upload_model',
+          data: formData,
+        );
       }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Model applied successfully!")));
+        setState(() {
+          _localModelPath = null;
+          _localInfoPath = null;
+          _localModelName = null;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text("Update failed: $e")));
+      }
+    } finally {
+      if (mounted) setState(() => _isUploading = false);
     }
   }
 
@@ -180,20 +199,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       ),
                     ],
                   ),
-                  if (_isUploading)
-                    const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
-                  else
-                    TextButton.icon(
-                      onPressed: _pickAndUploadModel,
-                      icon: const Icon(Icons.upload_file),
-                      label: const Text("UPLOAD ONNX"),
-                    ),
                 ],
               ),
-              const SizedBox(height: 10),
-              const Text("Select an .onnx model and model_info.json to update local and Pi inference.", 
-                style: TextStyle(fontSize: 10, color: Colors.white54)),
               const Divider(height: 24),
+              
+              // New separate selection fields
+              _modelSelectionField(
+                label: "ONNX Model",
+                fileName: _localModelName ?? "No file selected",
+                onTap: _pickModel,
+                icon: Icons.model_training,
+              ),
+              const SizedBox(height: 12),
+              _modelSelectionField(
+                label: "Info JSON",
+                fileName: _localInfoPath != null ? "model_info.json" : "No file selected",
+                onTap: _pickInfo,
+                icon: Icons.info_outline,
+              ),
+              
+              const SizedBox(height: 20),
+              
+              if (_isUploading)
+                const Center(child: CircularProgressIndicator())
+              else
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: (_localModelPath != null && _localInfoPath != null) ? _applyModelUpdate : null,
+                    icon: const Icon(Icons.cloud_upload_outlined),
+                    label: const Text("APPLY & UPLOAD TO PI"),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blueAccent,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                    ),
+                  ),
+                ),
+
+              const Divider(height: 32),
               SizedBox(
                 width: double.infinity,
                 child: OutlinedButton(
@@ -252,6 +296,37 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ]),
             const SizedBox(height: 40),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _modelSelectionField({required String label, required String fileName, required VoidCallback onTap, required IconData icon}) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(12),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: Colors.black.withOpacity(0.2),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.white.withOpacity(0.1)),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, size: 20, color: Colors.blueAccent),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label, style: const TextStyle(fontSize: 10, color: Colors.grey)),
+                  Text(fileName, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w500), overflow: TextOverflow.ellipsis),
+                ],
+              ),
+            ),
+            const Icon(Icons.folder_open, size: 18, color: Colors.grey),
           ],
         ),
       ),
