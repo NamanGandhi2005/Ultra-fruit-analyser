@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 class PiResult {
   final String fruit;
+  final String stageName;
   final double confidence;
   final bool isRotten;
   final Map<String, dynamic> nutrients;
@@ -18,6 +19,7 @@ class PiResult {
 
   PiResult({
     required this.fruit,
+    required this.stageName,
     required this.confidence,
     required this.isRotten,
     required this.nutrients,
@@ -33,6 +35,7 @@ class PiResult {
     final lastResult = json['last_result'] as Map<String, dynamic>?;
     return PiResult(
       fruit: lastResult?['fruit'] ?? 'Waiting...',
+      stageName: lastResult?['name'] ?? 'Initializing...',
       confidence: (lastResult?['confidence'] ?? 0.0).toDouble(),
       isRotten: lastResult?['is_rotten'] ?? false,
       nutrients: Map<String, dynamic>.from(lastResult?['nutrients'] ?? {}),

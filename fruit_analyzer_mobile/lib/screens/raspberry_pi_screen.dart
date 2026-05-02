@@ -291,7 +291,8 @@ class _RaspberryPiScreenState extends State<RaspberryPiScreen> {
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(res.fruit.toUpperCase(), style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+                    Text(res.fruit.toUpperCase(), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.blueAccent)),
+                    Text(res.stageName, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
                     Text(
                       res.isRotten ? "⚠ ROTTEN DETECTED" : "✔ FRESH & HEALTHY",
                       style: TextStyle(

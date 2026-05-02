@@ -184,15 +184,18 @@ class PredictionService {
 
     if (selectedFruit != 'auto') {
       double sum = 0;
+      String filter = selectedFruit.toLowerCase() + "_";
       for (int i = 0; i < avgProbs.length; i++) {
-        String label = _modelInfo!['class_names'][i];
-        if (!label.toLowerCase().contains(selectedFruit.toLowerCase())) {
+        String label = _modelInfo!['class_names'][i].toLowerCase();
+        if (!label.startsWith(filter)) {
           avgProbs[i] = 0;
         }
         sum += avgProbs[i];
       }
       if (sum > 0) {
         for (int i = 0; i < avgProbs.length; i++) avgProbs[i] /= sum;
+      } else {
+        print("⚠️ Warning: No classes matched filter '$filter'. Model might be forced to a wrong class.");
       }
     }
 

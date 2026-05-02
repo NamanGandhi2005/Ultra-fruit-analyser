@@ -229,8 +229,6 @@ class FruitPredictor:
                 with open(info_path, 'r') as f:
                     info = json.load(f)
                     self.class_names = info.get('class_names', [])
-                    # Explicitly sort for research determinism
-                    self.class_names.sort()
             
             print(f"✅ ONNX Model loaded: {model_path} ({len(self.class_names)} classes)")
         except Exception as e:
@@ -306,7 +304,8 @@ class FruitPredictor:
             # Filtering by manual fruit if selected
             target_fruit = remote_state["manual_fruit"].lower()
             if target_fruit != "auto":
-                mask = np.array([1.0 if target_fruit in c.lower() else 0.0 for c in self.class_names])
+                filter_prefix = target_fruit + "_"
+                mask = np.array([1.0 if c.lower().startswith(filter_prefix) else 0.0 for c in self.class_names])
                 if np.sum(mask) > 0:
                     avg_probs = avg_probs * mask
                     if np.sum(avg_probs) > 0: avg_probs /= np.sum(avg_probs)
