@@ -66,7 +66,7 @@ class PredictionService {
       await _loadDefaultModel();
     }
 
-    // Load Nutrient DB
+    // Load Nutrient DB with proper casting
     final nutrientsJson = await rootBundle.loadString('assets/data/nutrients.json');
     _nutrientDb = Map<String, dynamic>.from(json.decode(nutrientsJson));
 
@@ -113,6 +113,7 @@ class PredictionService {
     await init();
   }
 
+  // Softmax Implementation
   List<double> _softmax(List<double> logits) {
     double maxLogit = logits.reduce(max);
     List<double> exps = logits.map((l) => exp(l - maxLogit)).toList();
@@ -120,7 +121,7 @@ class PredictionService {
     return exps.map((e) => e / sumExps).toList();
   }
 
-  // --- REVERTED & REFINED CV LOGIC ---
+  // --- REFINED CV LOGIC (Kept but only active if hybridEnabled is true) ---
   bool isRottenCV(img.Image image, String fruit) {
     int brownCount = 0;
     int darkCount = 0;
@@ -175,8 +176,6 @@ class PredictionService {
     double darkRatio = darkCount / totalPixels;
     double moldRatio = moldCount / totalPixels;
 
-    print("CV Logs: Brown: ${brownRatio.toStringAsFixed(3)}, Dark: ${darkRatio.toStringAsFixed(3)}, Mold: ${moldRatio.toStringAsFixed(3)}");
-
     return (brownRatio >= brownRatioThreshold) || (darkRatio >= darkRatioThreshold) || (moldRatio >= 0.04);
   }
 
@@ -196,9 +195,11 @@ class PredictionService {
     final outputOrig = _session!.run(runOptions, {'input': _createTensor(inputOrig)});
     final outputFlip = _session!.run(runOptions, {'input': _createTensor(inputFlip)});
 
+    // Extract Logits
     final List<double> logitsOrig = List<double>.from((outputOrig[0]?.value as List<List<double>>)[0]);
     final List<double> logitsFlip = List<double>.from((outputFlip[0]?.value as List<List<double>>)[0]);
     
+    // Apply Softmax
     List<double> probsOrig = _softmax(logitsOrig);
     List<double> probsFlip = _softmax(logitsFlip);
 
@@ -248,15 +249,17 @@ class PredictionService {
     String decisionSource = "CNN Inference";
     List<String> corrections = [];
 
-    bool isRottenCVDetected = isRottenCV(imgOrig, fruit);
+    bool isRottenCVDetected = false;
+    if (hybridEnabled) {
+      isRottenCVDetected = isRottenCV(imgOrig, fruit);
+    }
     
     var fruitData = Map<String, dynamic>.from(_nutrientDb![fruit.toLowerCase()] ?? _nutrientDb![fruit] ?? {});
     var stageData = Map<String, dynamic>.from(fruitData[stage.toString()] ?? {});
-    bool dbSaysRotten = stageData['rotten'] ?? false;
-    bool isRottenFinal = dbSaysRotten;
+    bool isRottenFinal = stageData['rotten'] ?? false;
 
     if (hybridEnabled) {
-      if (dbSaysRotten && !isRottenCVDetected && finalConf < 0.85) {
+      if (isRottenFinal && !isRottenCVDetected && finalConf < 0.85) {
         int bestFreshIdx = -1;
         double bestFreshConf = -1.0;
 
