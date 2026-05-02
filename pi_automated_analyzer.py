@@ -306,6 +306,12 @@ class FruitPredictor:
             if target_fruit != "auto":
                 filter_prefix = target_fruit + "_"
                 mask = np.array([1.0 if c.lower().startswith(filter_prefix) else 0.0 for c in self.class_names])
+                
+                # SAFETY: Ensure mask matches avg_probs length
+                if len(mask) != len(avg_probs):
+                    print(f"⚠️ Warning: Model classes ({len(avg_probs)}) != Info classes ({len(mask)})")
+                    mask = mask[:len(avg_probs)] if len(mask) > len(avg_probs) else np.pad(mask, (0, len(avg_probs)-len(mask)))
+
                 if np.sum(mask) > 0:
                     avg_probs = avg_probs * mask
                     if np.sum(avg_probs) > 0: avg_probs /= np.sum(avg_probs)
@@ -313,7 +319,12 @@ class FruitPredictor:
             idx = np.argmax(avg_probs)
             conf = avg_probs[idx]
             
-            label = self.class_names[idx]
+            # SAFETY: Check if idx is within class_names range
+            if idx >= len(self.class_names):
+                label = f"unknown_class_{idx}"
+            else:
+                label = self.class_names[idx]
+            
             parts = label.split('_stage_')
             fruit = parts[0] if len(parts) == 2 else label.split('_')[0]
             stage = parts[1] if len(parts) == 2 else "1"
@@ -338,6 +349,8 @@ class FruitPredictor:
                 if rotten_db and not rotten_cv and conf < 0.92:
                     fresh_idx, max_fresh_prob = -1, -1
                     for i, name in enumerate(self.class_names):
+                        if i >= len(avg_probs): break # SAFETY: Avoid index out of range
+                        
                         if name.startswith(fruit):
                             s_id = name.split('_stage_')[1] if '_stage_' in name else "1"
                             if not fruit_db.get(s_id, {}).get('rotten', False):
@@ -365,7 +378,7 @@ class FruitPredictor:
                 'name': str(stage_info.get('name', 'Unidentified')),
                 'confidence': float(conf),
                 'is_rotten': is_rotten,
-                'nutrients': stage_info if not is_rotten else None,
+                'nutrients': stage_info if (stage_info and not is_rotten) else {},
                 'metadata': {
                     'decision_source': decision_source,
                     'corrections': corrections,
@@ -524,6 +537,8 @@ class PiFruitAnalyzer:
                 if not image_path: continue
                 
                 result = self.predictor.predict(image_path)
+                if result is None:
+                    continue
                 
                 # 2. Filter by manual fruit if selected
                 target_fruit = remote_state["manual_fruit"].lower()

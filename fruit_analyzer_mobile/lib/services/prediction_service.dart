@@ -180,13 +180,24 @@ class PredictionService {
 
     final probsOrig = (outputOrig[0]?.value as List<List<double>>)[0];
     final probsFlip = (outputFlip[0]?.value as List<List<double>>)[0];
-    List<double> avgProbs = List.generate(probsOrig.length, (i) => (probsOrig[i] + probsFlip[i]) / 2.0);
+    
+    // SAFETY: Ensure both outputs have same length
+    int probLen = min(probsOrig.length, probsFlip.length);
+    List<double> avgProbs = List.generate(probLen, (i) => (probsOrig[i] + probsFlip[i]) / 2.0);
 
     if (selectedFruit != 'auto') {
       double sum = 0;
       String filter = selectedFruit.toLowerCase() + "_";
+      List<String> classNames = List<String>.from(_modelInfo!['class_names'] ?? []);
+      
       for (int i = 0; i < avgProbs.length; i++) {
-        String label = _modelInfo!['class_names'][i].toLowerCase();
+        // SAFETY: Check if index exists in classNames
+        if (i >= classNames.length) {
+          avgProbs[i] = 0;
+          continue;
+        }
+        
+        String label = classNames[i].toLowerCase();
         if (!label.startsWith(filter)) {
           avgProbs[i] = 0;
         }
@@ -208,19 +219,24 @@ class PredictionService {
       }
     }
 
-    String finalLabel = _modelInfo!['class_names'][bestIdx];
+    List<String> classNames = List<String>.from(_modelInfo!['class_names'] ?? []);
+    String finalLabel = bestIdx < classNames.length ? classNames[bestIdx] : "unknown_0";
     double finalConf = maxProb;
 
     final parts = finalLabel.split('_stage_');
     String fruit = parts[0];
-    int stage = int.parse(parts[1]);
+    int stage = parts.length > 1 ? (int.tryParse(parts[1]) ?? 1) : 1;
 
     // Hybrid Metadata
     String decisionSource = "CNN Inference";
     List<String> corrections = [];
 
     bool isRottenCVDetected = isRottenCV(imgOrig, brownThreshold: 0.35, darkThreshold: 0.50);
-    bool dbSaysRotten = _nutrientDb![fruit][stage.toString()]['rotten'];
+    
+    // SAFETY: Check if fruit and stage exist in DB
+    var fruitData = _nutrientDb![fruit.toLowerCase()] ?? _nutrientDb![fruit] ?? {};
+    var stageData = fruitData[stage.toString()] ?? {};
+    bool dbSaysRotten = stageData['rotten'] ?? false;
     bool isRottenFinal = dbSaysRotten;
 
     if (hybridEnabled) {
@@ -230,15 +246,19 @@ class PredictionService {
         double bestFreshConf = -1.0;
 
         for (int i = 0; i < avgProbs.length; i++) {
-          String label = _modelInfo!['class_names'][i];
+          if (i >= classNames.length) break;
+          String label = classNames[i];
           if (label.startsWith(fruit) && label != finalLabel) {
             final p = label.split('_stage_');
-            int s = int.parse(p[1]);
-            if (!_nutrientDb![fruit][s.toString()]['rotten']) {
-              if (avgProbs[i] > (finalConf * 0.65)) {
-                if (avgProbs[i] > bestFreshConf) {
-                  bestFreshConf = avgProbs[i];
-                  bestFreshIdx = i;
+            if (p.length > 1) {
+              int s = int.tryParse(p[1]) ?? 1;
+              var sData = fruitData[s.toString()] ?? {};
+              if (!(sData['rotten'] ?? false)) {
+                if (avgProbs[i] > (finalConf * 0.65)) {
+                  if (avgProbs[i] > bestFreshConf) {
+                    bestFreshConf = avgProbs[i];
+                    bestFreshIdx = i;
+                  }
                 }
               }
             }
@@ -246,9 +266,10 @@ class PredictionService {
         }
 
         if (bestFreshIdx != -1) {
-          finalLabel = _modelInfo!['class_names'][bestFreshIdx];
+          finalLabel = classNames[bestFreshIdx];
           finalConf = bestFreshConf;
-          stage = int.parse(finalLabel.split('_stage_')[1]);
+          stage = int.tryParse(finalLabel.split('_stage_')[1]) ?? 1;
+          stageData = fruitData[stage.toString()] ?? {};
           isRottenFinal = false;
           decisionSource = "Hybrid Fusion";
           corrections.add("DB-to-Fresh Override (CV Guided)");
@@ -263,15 +284,15 @@ class PredictionService {
       }
     }
 
-    final resultData = _nutrientDb![fruit][stage.toString()];
+    final resultData = stageData;
 
     return PredictionResult(
       fruit: fruit,
       stage: stage,
-      stageName: resultData['name'],
+      stageName: resultData['name'] ?? 'Unidentified',
       confidence: finalConf,
       isRotten: isRottenFinal,
-      color: resultData['color'],
+      color: resultData['color'] ?? '#808080',
       nutrients: resultData,
       cvRottenDetected: isRottenCVDetected,
       metadata: {
