@@ -38,7 +38,7 @@ class PredictionService {
   Map<String, dynamic>? _modelInfo;
   bool _isInitialized = false;
   String _activeModelName = "Default ResNet18";
-  bool hybridEnabled = true;
+  bool hybridEnabled = false;
 
   bool get isInitialized => _isInitialized;
   String get activeModelName => _activeModelName;
@@ -56,7 +56,8 @@ class PredictionService {
       try {
         final modelBytes = await File(customModelPath).readAsBytes();
         _session = OrtSession.fromBuffer(modelBytes, OrtSessionOptions());
-        _modelInfo = json.decode(await File(customInfoPath).readAsString());
+        final String infoStr = await File(customInfoPath).readAsString();
+        _modelInfo = Map<String, dynamic>.from(json.decode(infoStr));
       } catch (e) {
         print("Error loading custom model: $e");
         await _loadDefaultModel();
@@ -65,9 +66,9 @@ class PredictionService {
       await _loadDefaultModel();
     }
 
-    // Load Nutrient DB (constant across models)
+    // Load Nutrient DB
     final nutrientsJson = await rootBundle.loadString('assets/data/nutrients.json');
-    _nutrientDb = json.decode(nutrientsJson);
+    _nutrientDb = Map<String, dynamic>.from(json.decode(nutrientsJson));
 
     _isInitialized = true;
   }
@@ -78,7 +79,7 @@ class PredictionService {
     _session = OrtSession.fromBuffer(modelBytes, OrtSessionOptions());
 
     final infoJson = await rootBundle.loadString('assets/data/model_info.json');
-    _modelInfo = json.decode(infoJson);
+    _modelInfo = Map<String, dynamic>.from(json.decode(infoJson));
     _activeModelName = "Default ResNet18";
   }
 
@@ -112,12 +113,23 @@ class PredictionService {
     await init();
   }
 
-  // --- PORTED CV LOGIC ---
-  bool isRottenCV(img.Image image, {double brownThreshold = 0.35, double darkThreshold = 0.50}) {
+  List<double> _softmax(List<double> logits) {
+    double maxLogit = logits.reduce(max);
+    List<double> exps = logits.map((l) => exp(l - maxLogit)).toList();
+    double sumExps = exps.reduce((a, b) => a + b);
+    return exps.map((e) => e / sumExps).toList();
+  }
+
+  // --- REVERTED & REFINED CV LOGIC ---
+  bool isRottenCV(img.Image image, String fruit) {
     int brownCount = 0;
     int darkCount = 0;
     int moldCount = 0;
     int totalPixels = image.width * image.height;
+
+    bool isWarmColorFruit = (fruit.toLowerCase() == 'orange' || fruit.toLowerCase() == 'mango');
+    double brownRatioThreshold = isWarmColorFruit ? 0.30 : 0.15;
+    double darkRatioThreshold = isWarmColorFruit ? 0.45 : 0.35;
 
     for (var pixel in image) {
       double r = pixel.r / 255.0;
@@ -140,17 +152,21 @@ class PredictionService {
       double s = maxVal == 0 ? 0 : delta / maxVal;
       double v = maxVal;
 
-      // Synchronized with Python Pi Version
-      // Brown: H[10,60], S>=0.19, V[0.08,0.58]
-      if (h >= 10 && h <= 60 && s >= 0.19 && v >= 0.08 && v <= 0.58) {
-        brownCount++;
+      if (isWarmColorFruit) {
+         if (h >= 5 && h <= 50 && s >= 0.2 && s <= 0.65 && v >= 0.05 && v <= 0.55) {
+           brownCount++;
+         }
+      } else {
+         if (h >= 10 && h <= 60 && s >= 0.18 && v >= 0.08 && v <= 0.65) {
+           brownCount++;
+         }
       }
-      // Dark: V < 0.13
-      if (v < 0.13) {
+
+      if (v < 0.12) {
         darkCount++;
       }
-      // Mold: H[140,200], S>=0.15, V>=0.15
-      if (h >= 140 && h <= 200 && s >= 0.15 && v >= 0.15) {
+
+      if (h >= 60 && h <= 200 && s <= 0.25 && v >= 0.25) {
         moldCount++;
       }
     }
@@ -159,7 +175,9 @@ class PredictionService {
     double darkRatio = darkCount / totalPixels;
     double moldRatio = moldCount / totalPixels;
 
-    return (brownRatio >= brownThreshold) || (darkRatio >= darkThreshold) || (moldRatio >= 0.05);
+    print("CV Logs: Brown: ${brownRatio.toStringAsFixed(3)}, Dark: ${darkRatio.toStringAsFixed(3)}, Mold: ${moldRatio.toStringAsFixed(3)}");
+
+    return (brownRatio >= brownRatioThreshold) || (darkRatio >= darkRatioThreshold) || (moldRatio >= 0.04);
   }
 
   Future<PredictionResult?> predict(String imagePath, {String selectedFruit = 'auto'}) async {
@@ -178,35 +196,36 @@ class PredictionService {
     final outputOrig = _session!.run(runOptions, {'input': _createTensor(inputOrig)});
     final outputFlip = _session!.run(runOptions, {'input': _createTensor(inputFlip)});
 
-    final probsOrig = (outputOrig[0]?.value as List<List<double>>)[0];
-    final probsFlip = (outputFlip[0]?.value as List<List<double>>)[0];
+    final List<double> logitsOrig = List<double>.from((outputOrig[0]?.value as List<List<double>>)[0]);
+    final List<double> logitsFlip = List<double>.from((outputFlip[0]?.value as List<List<double>>)[0]);
     
-    // SAFETY: Ensure both outputs have same length
+    List<double> probsOrig = _softmax(logitsOrig);
+    List<double> probsFlip = _softmax(logitsFlip);
+
     int probLen = min(probsOrig.length, probsFlip.length);
     List<double> avgProbs = List.generate(probLen, (i) => (probsOrig[i] + probsFlip[i]) / 2.0);
+
+    List<String> classNames = List<String>.from(_modelInfo!['class_names'] ?? []);
 
     if (selectedFruit != 'auto') {
       double sum = 0;
       String filter = selectedFruit.toLowerCase() + "_";
-      List<String> classNames = List<String>.from(_modelInfo!['class_names'] ?? []);
-      
       for (int i = 0; i < avgProbs.length; i++) {
-        // SAFETY: Check if index exists in classNames
         if (i >= classNames.length) {
           avgProbs[i] = 0;
           continue;
         }
-        
         String label = classNames[i].toLowerCase();
         if (!label.startsWith(filter)) {
           avgProbs[i] = 0;
         }
         sum += avgProbs[i];
       }
-      if (sum > 0) {
+
+      if (sum > 0.001) {
         for (int i = 0; i < avgProbs.length; i++) avgProbs[i] /= sum;
       } else {
-        print("⚠️ Warning: No classes matched filter '$filter'. Model might be forced to a wrong class.");
+        avgProbs = List.generate(probLen, (i) => (probsOrig[i] + probsFlip[i]) / 2.0);
       }
     }
 
@@ -219,7 +238,6 @@ class PredictionService {
       }
     }
 
-    List<String> classNames = List<String>.from(_modelInfo!['class_names'] ?? []);
     String finalLabel = bestIdx < classNames.length ? classNames[bestIdx] : "unknown_0";
     double finalConf = maxProb;
 
@@ -227,21 +245,18 @@ class PredictionService {
     String fruit = parts[0];
     int stage = parts.length > 1 ? (int.tryParse(parts[1]) ?? 1) : 1;
 
-    // Hybrid Metadata
     String decisionSource = "CNN Inference";
     List<String> corrections = [];
 
-    bool isRottenCVDetected = isRottenCV(imgOrig, brownThreshold: 0.35, darkThreshold: 0.50);
+    bool isRottenCVDetected = isRottenCV(imgOrig, fruit);
     
-    // SAFETY: Check if fruit and stage exist in DB
-    var fruitData = _nutrientDb![fruit.toLowerCase()] ?? _nutrientDb![fruit] ?? {};
-    var stageData = fruitData[stage.toString()] ?? {};
+    var fruitData = Map<String, dynamic>.from(_nutrientDb![fruit.toLowerCase()] ?? _nutrientDb![fruit] ?? {});
+    var stageData = Map<String, dynamic>.from(fruitData[stage.toString()] ?? {});
     bool dbSaysRotten = stageData['rotten'] ?? false;
     bool isRottenFinal = dbSaysRotten;
 
     if (hybridEnabled) {
-      // Smart Correction: If DB says rotten but AI is unsure and CV says fresh
-      if (dbSaysRotten && !isRottenCVDetected && finalConf < 0.92) {
+      if (dbSaysRotten && !isRottenCVDetected && finalConf < 0.85) {
         int bestFreshIdx = -1;
         double bestFreshConf = -1.0;
 
@@ -252,9 +267,9 @@ class PredictionService {
             final p = label.split('_stage_');
             if (p.length > 1) {
               int s = int.tryParse(p[1]) ?? 1;
-              var sData = fruitData[s.toString()] ?? {};
+              var sData = Map<String, dynamic>.from(fruitData[s.toString()] ?? {});
               if (!(sData['rotten'] ?? false)) {
-                if (avgProbs[i] > (finalConf * 0.65)) {
+                if (avgProbs[i] > (finalConf * 0.45)) {
                   if (avgProbs[i] > bestFreshConf) {
                     bestFreshConf = avgProbs[i];
                     bestFreshIdx = i;
@@ -269,31 +284,40 @@ class PredictionService {
           finalLabel = classNames[bestFreshIdx];
           finalConf = bestFreshConf;
           stage = int.tryParse(finalLabel.split('_stage_')[1]) ?? 1;
-          stageData = fruitData[stage.toString()] ?? {};
+          stageData = Map<String, dynamic>.from(fruitData[stage.toString()] ?? {});
           isRottenFinal = false;
           decisionSource = "Hybrid Fusion";
-          corrections.add("DB-to-Fresh Override (CV Guided)");
+          corrections.add("Heuristic-Guided Fresh Correction");
         }
       }
 
-      // CV Rotten Override
-      if (isRottenCVDetected && !isRottenFinal) {
+      if (isRottenCVDetected && !isRottenFinal && finalConf < 0.95) {
         isRottenFinal = true;
         decisionSource = "Hybrid Fusion";
-        corrections.add("CV Rot Detection");
+        corrections.add("CV Rot Detection Override");
+        
+        String? rottenStageKey;
+        fruitData.forEach((key, value) {
+          if (value is Map && value['rotten'] == true) {
+            rottenStageKey = key;
+          }
+        });
+        
+        if (rottenStageKey != null) {
+          stage = int.tryParse(rottenStageKey!) ?? stage;
+          stageData = Map<String, dynamic>.from(fruitData[rottenStageKey] ?? {});
+        }
       }
     }
-
-    final resultData = stageData;
 
     return PredictionResult(
       fruit: fruit,
       stage: stage,
-      stageName: resultData['name'] ?? 'Unidentified',
-      confidence: finalConf,
+      stageName: stageData['name'] ?? 'Unidentified',
+      confidence: finalConf.clamp(0.0, 1.0),
       isRotten: isRottenFinal,
-      color: resultData['color'] ?? '#808080',
-      nutrients: resultData,
+      color: stageData['color'] ?? '#808080',
+      nutrients: stageData,
       cvRottenDetected: isRottenCVDetected,
       metadata: {
         'decision_source': decisionSource,
