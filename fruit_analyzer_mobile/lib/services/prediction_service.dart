@@ -17,6 +17,7 @@ class PredictionResult {
   final String color;
   final Map<String, dynamic>? nutrients;
   final bool cvRottenDetected;
+  final Map<String, dynamic> metadata;
 
   PredictionResult({
     required this.fruit,
@@ -27,6 +28,7 @@ class PredictionResult {
     required this.color,
     this.nutrients,
     required this.cvRottenDetected,
+    required this.metadata,
   });
 }
 
@@ -36,6 +38,7 @@ class PredictionService {
   Map<String, dynamic>? _modelInfo;
   bool _isInitialized = false;
   String _activeModelName = "Default ResNet18";
+  bool hybridEnabled = true;
 
   bool get isInitialized => _isInitialized;
   String get activeModelName => _activeModelName;
@@ -110,7 +113,7 @@ class PredictionService {
   }
 
   // --- PORTED CV LOGIC ---
-  bool isRottenCV(img.Image image, {double brownThreshold = 0.40, double darkThreshold = 0.60}) {
+  bool isRottenCV(img.Image image, {double brownThreshold = 0.35, double darkThreshold = 0.50}) {
     int brownCount = 0;
     int darkCount = 0;
     int moldCount = 0;
@@ -137,13 +140,17 @@ class PredictionService {
       double s = maxVal == 0 ? 0 : delta / maxVal;
       double v = maxVal;
 
-      if (h >= 5 && h <= 35 && s >= 0.3 && v <= 0.6) {
+      // Synchronized with Python Pi Version
+      // Brown: H[10,60], S>=0.19, V[0.08,0.58]
+      if (h >= 10 && h <= 60 && s >= 0.19 && v >= 0.08 && v <= 0.58) {
         brownCount++;
       }
-      if (v < 0.15) {
+      // Dark: V < 0.13
+      if (v < 0.13) {
         darkCount++;
       }
-      if (h >= 75 && h <= 105 && s >= 0.2 && v >= 0.2) {
+      // Mold: H[140,200], S>=0.15, V>=0.15
+      if (h >= 140 && h <= 200 && s >= 0.15 && v >= 0.15) {
         moldCount++;
       }
     }
@@ -205,39 +212,54 @@ class PredictionService {
     String fruit = parts[0];
     int stage = int.parse(parts[1]);
 
-    bool isRottenCVDetected = isRottenCV(imgOrig);
-    bool dbSaysRotten = _nutrientDb![fruit][stage.toString()]['rotten'];
-    
-    if (dbSaysRotten && !isRottenCVDetected && finalConf < 0.95) {
-      double requiredFreshConf = finalConf < 0.60 ? 0.15 : 0.30;
-      int bestFreshIdx = -1;
-      double bestFreshConf = -1.0;
+    // Hybrid Metadata
+    String decisionSource = "CNN Inference";
+    List<String> corrections = [];
 
-      for (int i = 0; i < avgProbs.length; i++) {
-        String label = _modelInfo!['class_names'][i];
-        if (label.startsWith(fruit) && label != finalLabel) {
-          final p = label.split('_stage_');
-          int s = int.parse(p[1]);
-          if (!_nutrientDb![fruit][s.toString()]['rotten']) {
-            if (avgProbs[i] > requiredFreshConf && avgProbs[i] > (finalConf * 0.7)) {
-              if (avgProbs[i] > bestFreshConf) {
-                bestFreshConf = avgProbs[i];
-                bestFreshIdx = i;
+    bool isRottenCVDetected = isRottenCV(imgOrig, brownThreshold: 0.35, darkThreshold: 0.50);
+    bool dbSaysRotten = _nutrientDb![fruit][stage.toString()]['rotten'];
+    bool isRottenFinal = dbSaysRotten;
+
+    if (hybridEnabled) {
+      // Smart Correction: If DB says rotten but AI is unsure and CV says fresh
+      if (dbSaysRotten && !isRottenCVDetected && finalConf < 0.92) {
+        int bestFreshIdx = -1;
+        double bestFreshConf = -1.0;
+
+        for (int i = 0; i < avgProbs.length; i++) {
+          String label = _modelInfo!['class_names'][i];
+          if (label.startsWith(fruit) && label != finalLabel) {
+            final p = label.split('_stage_');
+            int s = int.parse(p[1]);
+            if (!_nutrientDb![fruit][s.toString()]['rotten']) {
+              if (avgProbs[i] > (finalConf * 0.65)) {
+                if (avgProbs[i] > bestFreshConf) {
+                  bestFreshConf = avgProbs[i];
+                  bestFreshIdx = i;
+                }
               }
             }
           }
         }
+
+        if (bestFreshIdx != -1) {
+          finalLabel = _modelInfo!['class_names'][bestFreshIdx];
+          finalConf = bestFreshConf;
+          stage = int.parse(finalLabel.split('_stage_')[1]);
+          isRottenFinal = false;
+          decisionSource = "Hybrid Fusion";
+          corrections.add("DB-to-Fresh Override (CV Guided)");
+        }
       }
 
-      if (bestFreshIdx != -1) {
-        finalLabel = _modelInfo!['class_names'][bestFreshIdx];
-        finalConf = bestFreshConf;
-        stage = int.parse(finalLabel.split('_stage_')[1]);
-        dbSaysRotten = false;
+      // CV Rotten Override
+      if (isRottenCVDetected && !isRottenFinal) {
+        isRottenFinal = true;
+        decisionSource = "Hybrid Fusion";
+        corrections.add("CV Rot Detection");
       }
     }
 
-    bool isRottenFinal = dbSaysRotten || isRottenCVDetected;
     final resultData = _nutrientDb![fruit][stage.toString()];
 
     return PredictionResult(
@@ -249,6 +271,12 @@ class PredictionService {
       color: resultData['color'],
       nutrients: resultData,
       cvRottenDetected: isRottenCVDetected,
+      metadata: {
+        'decision_source': decisionSource,
+        'corrections': corrections,
+        'cv_rot': isRottenCVDetected,
+        'hybrid_active': hybridEnabled,
+      },
     );
   }
 

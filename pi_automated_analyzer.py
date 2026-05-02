@@ -24,6 +24,7 @@ remote_state = {
     "focus_mode": "auto", # auto or manual
     "lens_pos": 0.0,
     "automated_enabled": True,
+    "hybrid_enabled": True, # For research: CNN only vs Hybrid
     "display1_mode": "result", # result, status, custom
     "display2_mode": "result", # result, status, custom
     "custom_text1_l1": "",
@@ -31,6 +32,13 @@ remote_state = {
     "custom_text2_l1": "",
     "custom_text2_l2": ""
 }
+
+@app.route('/set_hybrid', methods=['POST'])
+def set_hybrid():
+    data = request.json
+    remote_state["hybrid_enabled"] = data.get('enabled', True)
+    print(f"📡 Remote command: Hybrid Logic set to {remote_state['hybrid_enabled']}")
+    return jsonify({"status": "success", "enabled": remote_state["hybrid_enabled"]})
 
 @app.route('/upload_model', methods=['POST'])
 def upload_model():
@@ -156,6 +164,7 @@ def get_status():
         "focus_mode": remote_state["focus_mode"],
         "lens_pos": remote_state["lens_pos"],
         "automated_enabled": remote_state["automated_enabled"],
+        "hybrid_enabled": remote_state["hybrid_enabled"],
         "display1_mode": remote_state["display1_mode"],
         "display2_mode": remote_state["display2_mode"]
     })
@@ -220,6 +229,8 @@ class FruitPredictor:
                 with open(info_path, 'r') as f:
                     info = json.load(f)
                     self.class_names = info.get('class_names', [])
+                    # Explicitly sort for research determinism
+                    self.class_names.sort()
             
             print(f"✅ ONNX Model loaded: {model_path} ({len(self.class_names)} classes)")
         except Exception as e:
@@ -269,7 +280,7 @@ class FruitPredictor:
         return img_data
 
     def predict(self, image_path):
-        """Inference with ONNX and ROI Focus"""
+        """Inference with ONNX, ROI Focus, and Hybrid Decision Logic"""
         if self.session is None:
             return None
 
@@ -288,6 +299,7 @@ class FruitPredictor:
 
             # Run ONNX inference
             outputs = self.session.run(None, {self.input_name: input_batch})
+            # Softmax
             probs = np.exp(outputs[0]) / np.sum(np.exp(outputs[0]), axis=1, keepdims=True)
             avg_probs = np.mean(probs, axis=0)
             
@@ -307,28 +319,46 @@ class FruitPredictor:
             fruit = parts[0] if len(parts) == 2 else label.split('_')[0]
             stage = parts[1] if len(parts) == 2 else "1"
 
+            # Hybrid Metadata
+            decision_source = "CNN Inference"
+            corrections = []
+
+            # 1. CV Analysis
             rotten_cv = self.is_rotten(image_path)
+            
+            # 2. Database Knowledge
             fruit_db = self.NUTRIENT_DB.get(fruit.lower(), {})
             stage_info = fruit_db.get(str(stage), {})
             rotten_db = stage_info.get('rotten', False)
             
-            # Smart Correction
-            if rotten_db and not rotten_cv and conf < 0.90:
-                fresh_idx, max_fresh_prob = -1, -1
-                for i, name in enumerate(self.class_names):
-                    if name.startswith(fruit):
-                        s_id = name.split('_stage_')[1] if '_stage_' in name else "1"
-                        if not fruit_db.get(s_id, {}).get('rotten', False):
-                            if avg_probs[i] > max_fresh_prob:
-                                max_fresh_prob = avg_probs[i]; fresh_idx = i
-                
-                if fresh_idx != -1 and max_fresh_prob > (conf * 0.6):
-                    label = self.class_names[fresh_idx]
-                    stage = label.split('_stage_')[1] if '_stage_' in label else "1"
-                    conf = max_fresh_prob
-                    rotten_db = False
+            is_rotten = rotten_db
 
-            is_rotten = bool(rotten_db or rotten_cv)
+            # 3. Hybrid Logic Fusion (if enabled)
+            if remote_state.get("hybrid_enabled", True):
+                # Smart Correction: If DB says rotten but AI is unsure and CV says fresh
+                if rotten_db and not rotten_cv and conf < 0.92:
+                    fresh_idx, max_fresh_prob = -1, -1
+                    for i, name in enumerate(self.class_names):
+                        if name.startswith(fruit):
+                            s_id = name.split('_stage_')[1] if '_stage_' in name else "1"
+                            if not fruit_db.get(s_id, {}).get('rotten', False):
+                                if avg_probs[i] > max_fresh_prob:
+                                    max_fresh_prob = avg_probs[i]; fresh_idx = i
+                    
+                    if fresh_idx != -1 and max_fresh_prob > (conf * 0.65):
+                        label = self.class_names[fresh_idx]
+                        stage = label.split('_stage_')[1] if '_stage_' in label else "1"
+                        conf = max_fresh_prob
+                        stage_info = fruit_db.get(str(stage), {})
+                        is_rotten = False
+                        decision_source = "Hybrid Fusion"
+                        corrections.append("DB-to-Fresh Override (CV Guided)")
+
+                # CV Rotten Override: If CV detects rot, it forces Rotten regardless of CNN
+                if rotten_cv and not is_rotten:
+                    is_rotten = True
+                    decision_source = "Hybrid Fusion"
+                    corrections.append("CV Rot Detection")
 
             return {
                 'fruit': str(fruit.capitalize()),
@@ -336,7 +366,13 @@ class FruitPredictor:
                 'name': str(stage_info.get('name', 'Unidentified')),
                 'confidence': float(conf),
                 'is_rotten': is_rotten,
-                'nutrients': stage_info if not is_rotten else None
+                'nutrients': stage_info if not is_rotten else None,
+                'metadata': {
+                    'decision_source': decision_source,
+                    'corrections': corrections,
+                    'cv_rot': rotten_cv,
+                    'hybrid_active': remote_state.get("hybrid_enabled", True)
+                }
             }
         except Exception as e:
             print(f"Predict Error: {e}")
