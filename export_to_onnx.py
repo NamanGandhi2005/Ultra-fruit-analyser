@@ -4,7 +4,7 @@ from torchvision import models
 import json
 import os
 
-def export_model(model_path='fruit_resnet_model.pth', onnx_path='fruit_model.onnx', info_path='model_info.json'):
+def export_model(model_path='fruit_resnet18_model.pth', onnx_path='fruit_model.onnx', info_path='model_info.json'):
     if not os.path.exists(model_path):
         print(f"❌ Error: {model_path} not found.")
         return
@@ -23,7 +23,11 @@ def export_model(model_path='fruit_resnet_model.pth', onnx_path='fruit_model.onn
     # Attempt ResNet18
     try:
         model = models.resnet18(weights=None)
-        model.fc = nn.Linear(model.fc.in_features, num_classes)
+        num_ftrs = model.fc.in_features
+        if "fc.1.weight" in state_dict:
+             model.fc = nn.Sequential(nn.Dropout(0.2), nn.Linear(num_ftrs, num_classes))
+        else:
+             model.fc = nn.Linear(num_ftrs, num_classes)
         model.load_state_dict(state_dict)
         print("💡 Architecture detected: ResNet18")
         success = True
