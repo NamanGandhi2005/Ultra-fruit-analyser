@@ -122,6 +122,8 @@ class PredictionService {
 
   // --- REVERTED & REFINED CV LOGIC ---
   bool isRottenCV(img.Image image, String fruit) {
+    if (fruit.toLowerCase() == 'orange') return false; // Disabled for orange specifically per user request
+
     int brownCount = 0;
     int darkCount = 0;
     int moldCount = 0;
@@ -250,10 +252,18 @@ class PredictionService {
 
     bool isRottenCVDetected = isRottenCV(imgOrig, fruit);
     
+    // Hard override for orange - CV logic is completely bypassed
+    if (fruit.toLowerCase().contains('orange')) {
+      isRottenCVDetected = false;
+      print("INFO: Orange detected, forcing CV_Rotten=false");
+    }
+
     var fruitData = Map<String, dynamic>.from(_nutrientDb![fruit.toLowerCase()] ?? _nutrientDb![fruit] ?? {});
     var stageData = Map<String, dynamic>.from(fruitData[stage.toString()] ?? {});
     bool dbSaysRotten = stageData['rotten'] ?? false;
     bool isRottenFinal = dbSaysRotten;
+
+    print("DEBUG: Final Result -> Fruit: $fruit, Stage: $stage, Name: ${stageData['name']}, DB_Rotten: $dbSaysRotten, CV_Rotten: $isRottenCVDetected, Final_Rotten: $isRottenFinal, SelectedFruit: $selectedFruit");
 
     if (hybridEnabled) {
       if (dbSaysRotten && !isRottenCVDetected && finalConf < 0.85) {
