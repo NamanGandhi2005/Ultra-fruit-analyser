@@ -157,10 +157,19 @@ class PredictionService {
          if (h >= 5 && h <= 50 && s >= 0.2 && s <= 0.65 && v >= 0.05 && v <= 0.55) {
            brownCount++;
          }
-      } else {
-         if (h >= 10 && h <= 60 && s >= 0.18 && v >= 0.08 && v <= 0.65) {
-           brownCount++;
-         }
+      }
+      
+      if (fruit.toLowerCase() == 'apple') {
+        if (h >= 10 && h <= 60 && s >= 0.18 && v >= 0.08 && v <= 0.65) {
+          brownCount++;
+        }
+      }
+
+      if (fruit.toLowerCase() == 'banana') {
+        // Ignore small black speckles (normal ripening)
+        if (brownRatio < 0.25 && darkRatio < 0.30) {
+          return false;
+        }
       }
 
       if (v < 0.12) {
@@ -176,7 +185,7 @@ class PredictionService {
     double darkRatio = darkCount / totalPixels;
     double moldRatio = moldCount / totalPixels;
 
-    return (brownRatio >= brownRatioThreshold) || (darkRatio >= darkRatioThreshold) || (moldRatio >= 0.04);
+    return (brownRatio >= brownRatioThreshold) || (darkRatio >= darkRatioThreshold) || (moldRatio >= 0.06);
   }
 
   Future<PredictionResult?> predict(String imagePath, {String selectedFruit = 'auto'}) async {
@@ -249,6 +258,8 @@ class PredictionService {
     String decisionSource = "CNN Inference";
     List<String> corrections = [];
 
+    double brownThresh = (fruit.toLowerCase() == 'orange') ? 0.60 : 0.40;
+
     bool isRottenCVDetected = false;
     if (hybridEnabled) {
       isRottenCVDetected = isRottenCV(imgOrig, fruit);
@@ -259,6 +270,13 @@ class PredictionService {
     bool isRottenFinal = stageData['rotten'] ?? false;
 
     if (hybridEnabled) {
+
+      if (isRottenCVDetected && finalConf < 0.95) {
+        isRottenFinal = true;
+        decisionSource = "Hybrid Fusion";
+        corrections.add("CV Rot Detection Override");
+      }
+      
       if (isRottenFinal && !isRottenCVDetected && finalConf < 0.85) {
         int bestFreshIdx = -1;
         double bestFreshConf = -1.0;
