@@ -1,31 +1,196 @@
 {
     "banana": {
-        "1": {"name": "Unripe (Green)", "color": "#98FB98", "rotten": false, "sugar_g": 20, "vitamin_c_mg": 0.2, "resistant_starch_%": 72, "calories": 95, "benefits": "High in fiber"},
-        "2": {"name": "Slightly Unripe", "color": "#ADFF2F", "rotten": false, "sugar_g": 40, "vitamin_c_mg": 0.3, "resistant_starch_%": 68, "calories": 100, "benefits": "Balanced starch"},
-        "3": {"name": "Yellowish Green", "color": "#CCFF00", "rotten": false, "sugar_g": 60, "vitamin_c_mg": 0.3, "resistant_starch_%": 64, "calories": 102, "benefits": "High prebiotic value"},
-        "4": {"name": "Slightly Ripe", "color": "#D4FF00", "rotten": false, "sugar_g": 80, "vitamin_c_mg": 0.3, "resistant_starch_%": 60, "calories": 105, "benefits": "Good energy source"},
-        "5": {"name": "Moderately Ripe", "color": "#FFFF00", "rotten": false, "sugar_g": 180, "vitamin_c_mg": 0.3, "resistant_starch_%": 50, "calories": 110, "benefits": "Easy to digest"},
-        "6": {"name": "Ripe (Yellow)", "color": "#FFD700", "rotten": false, "sugar_g": 270, "vitamin_c_mg": 0.3, "resistant_starch_%": 40, "calories": 115, "benefits": "High antioxidants"},
-        "7": {"name": "Overripe (Spotted)", "color": "#FFA500", "rotten": false, "sugar_g": 320, "vitamin_c_mg": 0.2, "resistant_starch_%": 30, "calories": 125, "benefits": "Great for smoothies"},
-        "8": {"name": "Very Overripe", "color": "#B8860B", "rotten": false, "sugar_g": 340, "vitamin_c_mg": 0.1, "resistant_starch_%": 20, "calories": 128, "benefits": "Ideal for baking"},
-        "9": {"name": "Rotten", "color": "#8B4513", "rotten": true, "sugar_g": 350, "vitamin_c_mg": 0.1, "resistant_starch_%": 15, "calories": 130, "benefits": "Non-food uses only"}
+        "1": {
+            "name": "Fully Unripe",
+            "color": "#90EE90",
+            "rotten": false,
+            "sugar_g": 19,
+            "vitamin_c_mg": 0.2,
+            "resistant_starch_%": 76,
+            "calories": 89,
+            "benefits": "High in resistant starch"
+        },
+        "2": {
+            "name": "Early Unripe",
+            "color": "#98FB98",
+            "rotten": false,
+            "sugar_g": 28,
+            "vitamin_c_mg": 0.2,
+            "resistant_starch_%": 72,
+            "calories": 95,
+            "benefits": "Prebiotic fiber source"
+        },
+        "3": {
+            "name": "Semi Ripe",
+            "color": "#ADFF2F",
+            "rotten": false,
+            "sugar_g": 52,
+            "vitamin_c_mg": 0.3,
+            "resistant_starch_%": 68,
+            "calories": 105,
+            "benefits": "Balanced starch/sugar"
+        },
+        "4": {
+            "name": "Ripe",
+            "color": "#FFFF00",
+            "rotten": false,
+            "sugar_g": 183,
+            "vitamin_c_mg": 0.3,
+            "resistant_starch_%": 57,
+            "calories": 110,
+            "benefits": "Good energy source"
+        },
+        "5": {
+            "name": "Fully Ripe",
+            "color": "#FFD700",
+            "rotten": false,
+            "sugar_g": 272,
+            "vitamin_c_mg": 0.3,
+            "resistant_starch_%": 54,
+            "calories": 115,
+            "benefits": "Easy to digest"
+        },
+        "6": {
+            "name": "Overripe",
+            "color": "#FFA500",
+            "rotten": false,
+            "sugar_g": 316,
+            "vitamin_c_mg": 0.3,
+            "resistant_starch_%": 45,
+            "calories": 120,
+            "benefits": "High antioxidants"
+        },
+        "7": {
+            "name": "Rotten",
+            "color": "#8B0000",
+            "rotten": true,
+            "sugar_g": 374,
+            "vitamin_c_mg": 0.1,
+             "resistant_starch_%": 32,
+            "calories": 135,
+            "benefits": "Do not consume"
+        }
     },
     "apple": {
-        "1": {"name": "Unripe", "color": "#90EE90", "rotten": false, "sugar_g": 8, "vitamin_c_mg": 5, "fiber_g": 2.5, "calories": 52, "benefits": "Firm and tart"},
-        "2": {"name": "Ripe", "color": "#FF0000", "rotten": false, "sugar_g": 13, "vitamin_c_mg": 8, "fiber_g": 3.0, "calories": 60, "benefits": "Sweet and crisp"},
-        "3": {"name": "Rotten", "color": "#8B0000", "rotten": true, "sugar_g": 15, "vitamin_c_mg": 3, "fiber_g": 1.2, "calories": 65, "benefits": "Do not consume"}
+        "1": {
+            "name": "Unripe",
+            "color": "#90EE90",
+            "rotten": false,
+            "sugar_g": 8,
+            "vitamin_c_mg": 5,
+            "fiber_g": 2.5,
+            "calories": 52,
+            "benefits": "Firm and tart"
+        },
+         "2": {
+            "name": " Slightly Ripe",
+            "color": "#ADFF2E",
+            "rotten": false,
+            "sugar_g": 10,
+            "vitamin_c_mg": 5,
+            "fiber_g": 3.0,
+            "calories": 58,
+            "benefits": "Balanced flavor"
+        },
+        "3": {
+            "name": "Ripe",
+            "color": "#ADFF2F",
+            "rotten": false,
+            "sugar_g": 12,
+            "vitamin_c_mg": 7,
+            "fiber_g": 3.0,
+            "calories": 58,
+            "benefits": "Balanced flavor"
+        },
+        "4": {
+            "name": "Rotten",
+            "color": "#8B0000",
+            "rotten": true,
+            "sugar_g": 18,
+            "vitamin_c_mg": 4,
+            "fiber_g": 1.5,
+            "calories": 65,
+            "benefits": "Do not consume"
+        }
     },
     "orange": {
-        "1": {"name": "Unripe", "color": "#98FB98", "rotten": false, "sugar_g": 7, "vitamin_c_mg": 52, "calories": 50, "benefits": "Tart flavor"},
-        "2": {"name": "Slightly Ripe", "color": "#FFD700", "rotten": false, "sugar_g": 8, "vitamin_c_mg": 50, "calories": 55, "benefits": "Mild sweetness"},
-        "3": {"name": "Ripe", "color": "#FFA500", "rotten": false, "sugar_g": 10, "vitamin_c_mg": 48, "calories": 60, "benefits": "Juicy and sweet"},
-        "4": {"name": "Overripe", "color": "#A0522D", "rotten": false, "sugar_g": 11, "vitamin_c_mg": 30, "calories": 62, "benefits": "Use quickly"},
-        "5": {"name": "Rotten", "color": "#8B4513", "rotten": true, "sugar_g": 9, "vitamin_c_mg": 25, "calories": 65, "benefits": "Do not consume"}
+        "1": {
+            "name": "Unripe",
+            "color": "#98FB98",
+            "rotten": false,
+            "sugar_g": 7,
+            "vitamin_c_mg": 52,
+            "calories": 50,
+            "benefits": "Tart flavor"
+        },
+        "2": {
+            "name": "Slightly Ripe",
+            "color": "#FFA500",
+            "rotten": false,
+            "sugar_g": 9,
+            "vitamin_c_mg": 47,
+            "calories": 60,
+            "benefits": "Sweet and tangy"
+        },
+        "3": {
+            "name": "Ripe",
+            "color": "#FF8C00",
+            "rotten": false,
+            "sugar_g": 8,
+            "vitamin_c_mg": 48,
+            "calories": 65,
+            "benefits": "Max juiciness"
+        },
+        "4": {
+            "name": "Rotten",
+            "color": "#8B0000",
+            "rotten": true,
+            "sugar_g": 8,
+            "vitamin_c_mg": 50,
+            "calories": 70,
+            "benefits": "Do not consume"
+        }
     },
     "mango": {
-        "1": {"name": "Unripe", "color": "#98FB98", "rotten": false, "sugar_g": 10, "vitamin_c_mg": 30, "fiber_g": 2.5, "calories": 65, "benefits": "Firm texture"},
-        "2": {"name": "Slightly Ripe", "color": "#FFD700", "rotten": false, "sugar_g": 15, "vitamin_c_mg": 35, "fiber_g": 2.2, "calories": 75, "benefits": "Increasing sweetness"},
-        "3": {"name": "Ripe", "color": "#FFA500", "rotten": false, "sugar_g": 20, "vitamin_c_mg": 45, "fiber_g": 2.0, "calories": 85, "benefits": "Sweet and juicy"},
-        "4": {"name": "Rotten", "color": "#8B0000", "rotten": true, "sugar_g": 22, "vitamin_c_mg": 20, "fiber_g": 1.0, "calories": 90, "benefits": "Do not consume"}
+        "1": {
+            "name": "Unripe",
+            "color": "#98FB98",
+            "rotten": false,
+            "sugar_g": 10,
+            "vitamin_c_mg": 30,
+            "fiber_g": 2.5,
+            "calories": 65,
+            "benefits": "Firm texture"
+        },
+        "2": {
+            "name": "Slightly Ripe",
+            "color": "#FFD700",
+            "rotten": false,
+            "sugar_g": 18,
+            "vitamin_c_mg": 45,
+            "fiber_g": 2.0,
+            "calories": 80,
+            "benefits": "Sweet and juicy"
+        },
+        "3": {
+            "name": "Ripe",
+            "color": "#90EE90",
+            "rotten": false,
+            "sugar_g": 20,
+            "vitamin_c_mg": 45,
+            "fiber_g": 1.5,
+            "calories": 50,
+            "benefits": "Good Immunity booster"
+        },
+        "4": {
+            "name": "Rotten",
+            "color": "#8B0000",
+            "rotten": true,
+            "sugar_g": 22,
+            "vitamin_c_mg": 25,
+            "fiber_g": 1.0,
+            "calories": 90,
+            "benefits": "Do not consume"
+        }
     }
 }
