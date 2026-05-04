@@ -190,152 +190,162 @@ class PredictionService {
 
   Future<PredictionResult?> predict(String imagePath, {String selectedFruit = 'auto'}) async {
     if (!_isInitialized) await init();
-
     final imageBytes = await File(imagePath).readAsBytes();
     final rawImage = img.decodeImage(imageBytes);
-    if (rawImage == null) return null;
-
+    if (rawImage == null) {
+      throw Exception("Image decoding failed");
+    }
+    // --- Resize ---
     final imgOrig = img.copyResize(rawImage, width: 224, height: 224);
+
+    // --- Preprocess ---
     final inputOrig = _preprocess(imgOrig);
     final imgFlip = img.copyFlip(imgOrig, direction: img.FlipDirection.horizontal);
     final inputFlip = _preprocess(imgFlip);
 
+    // --- Inference ---
     final runOptions = OrtRunOptions();
     final outputOrig = _session!.run(runOptions, {'input': _createTensor(inputOrig)});
     final outputFlip = _session!.run(runOptions, {'input': _createTensor(inputFlip)});
 
-    // Extract Logits
-    final List<double> logitsOrig = List<double>.from((outputOrig[0]?.value as List<List<double>>)[0]);
-    final List<double> logitsFlip = List<double>.from((outputFlip[0]?.value as List<List<double>>)[0]);
-    
-    // Apply Softmax
-    List<double> probsOrig = _softmax(logitsOrig);
-    List<double> probsFlip = _softmax(logitsFlip);
+    // --- Extract logits safely ---
+    if (outputOrig.isEmpty || outputFlip.isEmpty) {
+      throw Exception("Model output is empty");
+    }
 
-    int probLen = min(probsOrig.length, probsFlip.length);
-    List<double> avgProbs = List.generate(probLen, (i) => (probsOrig[i] + probsFlip[i]) / 2.0);
+    final logitsOrig = List<double>.from((outputOrig[0]!.value as List<List<double>>)[0]);
+    final logitsFlip = List<double>.from((outputFlip[0]!.value as List<List<double>>)[0]);
 
-    List<String> classNames = List<String>.from(_modelInfo!['class_names'] ?? []);
+    if (logitsOrig.length != logitsFlip.length) {
+      throw Exception("Logit size mismatch between TTA passes");
+    }
+
+    // --- ✅ CORRECT TTA: average logits, NOT probabilities ---
+    final avgLogits = List<double>.generate(
+      logitsOrig.length,
+      (i) => (logitsOrig[i] + logitsFlip[i]) / 2.0,
+    );
+
+    final probs = _softmax(avgLogits);
+
+    // --- Class names ---
+    final classNames = List<String>.from(_modelInfo!['class_names'] ?? []);
+    if (classNames.isEmpty) {
+      throw Exception("class_names missing in model_info");
+    }
+
+    if (probs.length != classNames.length) {
+      throw Exception("Mismatch: probs=${probs.length}, classes=${classNames.length}");
+    }
+
+    // --- Optional fruit filter (robust) ---
+    List<double> filteredProbs = List.from(probs);
 
     if (selectedFruit != 'auto') {
-      double sum = 0;
-      String filter = selectedFruit.toLowerCase() + "_";
-      for (int i = 0; i < avgProbs.length; i++) {
-        if (i >= classNames.length) {
-          avgProbs[i] = 0;
-          continue;
+      final fruitKey = selectedFruit.toLowerCase().trim();
+
+      double sum = 0.0;
+      for (int i = 0; i < filteredProbs.length; i++) {
+        final label = classNames[i].toLowerCase();
+
+        if (!label.contains('${fruitKey}_stage_')) {
+          filteredProbs[i] = 0.0;
         }
-        String label = classNames[i].toLowerCase();
-        if (!label.startsWith(filter)) {
-          avgProbs[i] = 0;
-        }
-        sum += avgProbs[i];
+
+        sum += filteredProbs[i];
       }
 
-      if (sum > 0.001) {
-        for (int i = 0; i < avgProbs.length; i++) avgProbs[i] /= sum;
+      // Renormalize safely
+      if (sum > 1e-6) {
+        for (int i = 0; i < filteredProbs.length; i++) {
+          filteredProbs[i] /= sum;
+        }
       } else {
-        avgProbs = List.generate(probLen, (i) => (probsOrig[i] + probsFlip[i]) / 2.0);
+        // fallback: revert to original probs
+        filteredProbs = List.from(probs);
       }
     }
 
+    // --- Argmax ---
     int bestIdx = 0;
-    double maxProb = -1.0;
-    for (int i = 0; i < avgProbs.length; i++) {
-      if (avgProbs[i] > maxProb) {
-        maxProb = avgProbs[i];
+    double bestProb = filteredProbs[0];
+
+    for (int i = 1; i < filteredProbs.length; i++) {
+      if (filteredProbs[i] > bestProb) {
+        bestProb = filteredProbs[i];
         bestIdx = i;
       }
     }
 
-    String finalLabel = bestIdx < classNames.length ? classNames[bestIdx] : "unknown_0";
-    double finalConf = maxProb;
+    // --- Validate index ---
+    if (bestIdx >= classNames.length) {
+      throw Exception("Invalid prediction index: $bestIdx");
+    }
+
+    final finalLabel = classNames[bestIdx];
+
+    // --- Parse label STRICTLY ---
+    if (!finalLabel.contains('_stage_')) {
+      throw Exception("Malformed label: $finalLabel");
+    }
 
     final parts = finalLabel.split('_stage_');
-    String fruit = parts[0];
-    int stage = parts.length > 1 ? (int.tryParse(parts[1]) ?? 1) : 1;
+    if (parts.length != 2) {
+      throw Exception("Invalid label format: $finalLabel");
+    }
 
-    String decisionSource = "CNN Inference";
-    List<String> corrections = [];
+    final fruit = parts[0].trim().toLowerCase();
 
-    double brownThresh = (fruit.toLowerCase() == 'orange') ? 0.60 : 0.40;
+    final stage = int.tryParse(parts[1]);
+    if (stage == null) {
+      throw Exception("Stage parsing failed for label: $finalLabel");
+    }
+
+    // --- DB lookup (STRICT, no silent fallback) ---
+    if (!_nutrientDb!.containsKey(fruit)) {
+      throw Exception("Fruit not found in DB: $fruit");
+    }
+
+    final fruitData = Map<String, dynamic>.from(_nutrientDb![fruit]);
+
+    final stageKey = stage.toString();
+    if (!fruitData.containsKey(stageKey)) {
+      throw Exception("Stage $stageKey missing for fruit $fruit");
+    }
+
+    final stageData = Map<String, dynamic>.from(fruitData[stageKey]);
+
+    // --- Rotten logic ---
+    bool isRottenFinal = stageData['rotten'] ?? false;
 
     bool isRottenCVDetected = false;
     if (hybridEnabled) {
       isRottenCVDetected = isRottenCV(imgOrig, fruit);
     }
-    
-    var fruitData = Map<String, dynamic>.from(_nutrientDb![fruit.toLowerCase()] ?? _nutrientDb![fruit] ?? {});
-    var stageData = Map<String, dynamic>.from(fruitData[stage.toString()] ?? {});
-    bool isRottenFinal = stageData['rotten'] ?? false;
+
+    // --- Hybrid override (optional) ---
+    String decisionSource = "CNN";
+    List<String> corrections = [];
 
     if (hybridEnabled) {
-
-      if (isRottenCVDetected && finalConf < 0.95) {
+      if (isRottenCVDetected && bestProb < 0.95) {
         isRottenFinal = true;
-        decisionSource = "Hybrid Fusion";
-        corrections.add("CV Rot Detection Override");
-      }
-      
-      if (isRottenFinal && !isRottenCVDetected && finalConf < 0.85) {
-        int bestFreshIdx = -1;
-        double bestFreshConf = -1.0;
-
-        for (int i = 0; i < avgProbs.length; i++) {
-          if (i >= classNames.length) break;
-          String label = classNames[i];
-          if (label.startsWith(fruit) && label != finalLabel) {
-            final p = label.split('_stage_');
-            if (p.length > 1) {
-              int s = int.tryParse(p[1]) ?? 1;
-              var sData = Map<String, dynamic>.from(fruitData[s.toString()] ?? {});
-              if (!(sData['rotten'] ?? false)) {
-                if (avgProbs[i] > (finalConf * 0.45)) {
-                  if (avgProbs[i] > bestFreshConf) {
-                    bestFreshConf = avgProbs[i];
-                    bestFreshIdx = i;
-                  }
-                }
-              }
-            }
-          }
-        }
-
-        if (bestFreshIdx != -1) {
-          finalLabel = classNames[bestFreshIdx];
-          finalConf = bestFreshConf;
-          stage = int.tryParse(finalLabel.split('_stage_')[1]) ?? 1;
-          stageData = Map<String, dynamic>.from(fruitData[stage.toString()] ?? {});
-          isRottenFinal = false;
-          decisionSource = "Hybrid Fusion";
-          corrections.add("Heuristic-Guided Fresh Correction");
-        }
-      }
-
-      if (isRottenCVDetected && !isRottenFinal && finalConf < 0.95) {
-        isRottenFinal = true;
-        decisionSource = "Hybrid Fusion";
-        corrections.add("CV Rot Detection Override");
-        
-        String? rottenStageKey;
-        fruitData.forEach((key, value) {
-          if (value is Map && value['rotten'] == true) {
-            rottenStageKey = key;
-          }
-        });
-        
-        if (rottenStageKey != null) {
-          stage = int.tryParse(rottenStageKey!) ?? stage;
-          stageData = Map<String, dynamic>.from(fruitData[rottenStageKey] ?? {});
-        }
+        decisionSource = "Hybrid";
+        corrections.add("CV override");
       }
     }
+
+    // --- Debug logs (KEEP during testing) ---
+    print("Prediction Debug:");
+    print("  Label: $finalLabel");
+    print("  Fruit: $fruit | Stage: $stage");
+    print("  Confidence: $bestProb");
 
     return PredictionResult(
       fruit: fruit,
       stage: stage,
-      stageName: stageData['name'] ?? 'Unidentified',
-      confidence: finalConf.clamp(0.0, 1.0),
+      stageName: stageData['name'] ?? 'Unknown',
+      confidence: bestProb.clamp(0.0, 1.0),
       isRotten: isRottenFinal,
       color: stageData['color'] ?? '#808080',
       nutrients: stageData,
@@ -343,8 +353,7 @@ class PredictionService {
       metadata: {
         'decision_source': decisionSource,
         'corrections': corrections,
-        'cv_rot': isRottenCVDetected,
-        'hybrid_active': hybridEnabled,
+        'hybrid_active': hybridEnabled
       },
     );
   }
