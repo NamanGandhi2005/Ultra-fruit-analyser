@@ -165,13 +165,6 @@ class PredictionService {
         }
       }
 
-      if (fruit.toLowerCase() == 'banana') {
-        // Ignore small black speckles (normal ripening)
-        if (brownRatio < 0.25 && darkRatio < 0.30) {
-          return false;
-        }
-      }
-
       if (v < 0.12) {
         darkCount++;
       }
@@ -184,6 +177,13 @@ class PredictionService {
     double brownRatio = brownCount / totalPixels;
     double darkRatio = darkCount / totalPixels;
     double moldRatio = moldCount / totalPixels;
+
+    if (fruit.toLowerCase() == 'banana') {
+      // Ignore small black speckles (normal ripening)
+      if (brownRatio < 0.25 && darkRatio < 0.30) {
+        return false;
+      }
+    }
 
     return (brownRatio >= brownRatioThreshold) || (darkRatio >= darkRatioThreshold) || (moldRatio >= 0.06);
   }
