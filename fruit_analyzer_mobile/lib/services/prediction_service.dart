@@ -252,10 +252,38 @@ class PredictionService {
 
     bool isRottenCVDetected = isRottenCV(imgOrig, fruit);
     
-    // Hard override for orange - CV logic is completely bypassed
-    if (fruit.toLowerCase().contains('orange')) {
-      isRottenCVDetected = false;
-      print("INFO: Orange detected, forcing CV_Rotten=false");
+    // --------------------------------------------------
+    // ORANGE STAGE-3 / STAGE-4 STABILIZATION
+    // --------------------------------------------------
+    if (fruit.toLowerCase() == 'orange' && stage == 4) {
+      int stage3Idx = classNames.indexOf('orange_stage_3');
+      if (stage3Idx != -1){
+        double stage3Prob = avgProbs[stage3Idx];
+        double probGap = finalConf - stage3Prob;
+
+        print(
+          "Orange correction check -> "
+          "Stage4Conf: ${finalConf.toStringAsFixed(3)}, "
+          "Stage3Conf: ${stage3Prob.toStringAsFixed(3)}, "
+          "Gap: ${probGap.toStringAsFixed(3)}"
+        );
+
+        // CASE:
+        // Model is uncertain between stage 3 and stage 4
+        if (finalConf < 0.80 && probGap < 0.12){
+          print("Hybrid correction applied: Orange Stage 4 -> Stage 3");
+
+          finalLabel = 'orange_stage_3';
+          finalConf = stage3Prob;
+
+          stage = 3;
+          decisionSource = "Hybrid Confidence Correction";
+
+          corrections.add(
+            "Orange Stage4 downgraded to Stage3 due to low-confidence boundary prediction"
+          );
+        }
+      }
     }
 
     var fruitData = Map<String, dynamic>.from(_nutrientDb![fruit.toLowerCase()] ?? _nutrientDb![fruit] ?? {});
