@@ -554,9 +554,9 @@ class _HomeScreenState extends State<HomeScreen> {
               crossAxisSpacing: 12,
               childAspectRatio: 2.5,
               children: [
-                _buildMetricPill("Sugar", "${result.nutrients!['sugar_g']}g", Icons.grain_rounded),
+                _buildMetricPill("Sugar", "${result.nutrients!['sugar_g']}mg", Icons.grain_rounded),
                 _buildMetricPill("Vit C", "${result.nutrients!['vitamin_c_mg']}mg", Icons.bolt_rounded),
-                _buildMetricPill("Fiber", "${result.nutrients!['fiber_g']}g", Icons.grass_rounded),
+                _buildMetricPill("Fiber", "${result.nutrients!['fiber_g']}mg", Icons.grass_rounded),
                 _buildMetricPill("Calories", "${result.nutrients!['calories']}", Icons.fire_hydrant_alt_rounded),
               ],
             ),
@@ -567,7 +567,7 @@ class _HomeScreenState extends State<HomeScreen> {
           if (result.stage >= (result.fruit == 'banana' ? 7 : 4))
             Padding(
               padding: const EdgeInsets.only(top: 20),
-              child: _buildRecipeCTA(result.isRotten ? "Discover non-food uses" : "Explore 5-min recipes", isRotten: result.isRotten),
+              child: _buildRecipeCTA(result.isRotten ? "AI: Non-food uses" : "Get AI Suggestions", isRotten: result.isRotten),
             ),
         ],
       ),

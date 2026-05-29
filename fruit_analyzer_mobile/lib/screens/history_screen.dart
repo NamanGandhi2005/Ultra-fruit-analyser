@@ -361,9 +361,9 @@ class _ScanDetailSheet extends StatelessWidget {
                   const SizedBox(height: 12),
                   
                   _buildNutrientRow(context, "Calories", "${scan.nutrients['calories'] ?? 'N/A'}", Icons.local_fire_department, Colors.orange),
-                  _buildNutrientRow(context, "Sugar", "${scan.nutrients['sugar_g'] ?? 'N/A'} g", Icons.grain, Colors.pink),
+                  _buildNutrientRow(context, "Sugar", "${scan.nutrients['sugar_g'] ?? 'N/A'} mg", Icons.grain, Colors.pink),
                   _buildNutrientRow(context, "Vitamin C", "${scan.nutrients['vitamin_c_mg'] ?? 'N/A'} mg", Icons.health_and_safety, Colors.green),
-                  _buildNutrientRow(context, "Fiber", "${scan.nutrients['fiber_g'] ?? 'N/A'} g", Icons.grass, Colors.brown),
+                  _buildNutrientRow(context, "Fiber", "${scan.nutrients['fiber_g'] ?? 'N/A'} mg", Icons.grass, Colors.brown),
                   
                   const SizedBox(height: 20),
                   

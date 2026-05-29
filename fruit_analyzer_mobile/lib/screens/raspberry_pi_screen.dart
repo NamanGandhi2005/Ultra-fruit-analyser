@@ -311,9 +311,9 @@ class _RaspberryPiScreenState extends State<RaspberryPiScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceAround,
                 children: [
-                  _nutrientIcon(FontAwesomeIcons.cubes, "${res.nutrients['sugar_g']}g"),
+                  _nutrientIcon(FontAwesomeIcons.cubes, "${res.nutrients['sugar_g']}mg"),
                   _nutrientIcon(FontAwesomeIcons.bolt, "${res.nutrients['calories']}"),
-                  _nutrientIcon(FontAwesomeIcons.appleWhole, "${res.nutrients['fiber_g']}g"),
+                  _nutrientIcon(FontAwesomeIcons.appleWhole, "${res.nutrients['fiber_g']}mg"),
                 ],
               ),
           ],
